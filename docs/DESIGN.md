@@ -27,6 +27,12 @@ supported tests. Still inside the matching ROCm image it captures `file`,
 `ldd`, `readelf`, toolchain versions, the CMake cache, and LLVM offload data.
 Missing runtime libraries or absent `gfx1201` evidence fail the build.
 
+The selected ROCm `complete`/`full` images already contain the SDK. Only generic
+host build utilities are installed with APT. In particular, ROCm 10 does not
+publish ROCm 7's individual `*-dev` names through that image's configured
+repository; toolchain/header/library presence and CMake discovery are the
+cross-version contract.
+
 `package.sh` adds immutable build/submodule provenance and the license texts of
 the bundled code. `verify-package.sh` validates both the directory and final
 archive before generating its checksum.

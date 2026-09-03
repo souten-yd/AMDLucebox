@@ -10,9 +10,16 @@ ENV PATH=/opt/rocm/bin:/opt/rocm/lib/llvm/bin:${PATH}
 RUN test "$LLVM_TARGET" = gfx1201
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential ca-certificates cmake curl file git git-lfs \
-      hipblas-dev hipcub-dev libcurl4-openssl-dev ninja-build pkg-config \
-      python3 rocblas-dev rocprim-dev rocwmma-dev zstd \
+      libcurl4-openssl-dev ninja-build pkg-config python3 zstd \
     && rm -rf /var/lib/apt/lists/*
+
+# The pinned `complete` / `full` images carry the ROCm SDK. ROCm 10 no longer
+# exposes the ROCm 7 `*-dev` package names through the image's configured APT
+# source, so validate the SDK itself instead of reinstalling stale package names.
+RUN command -v hipcc \
+    && test -x /opt/rocm/lib/llvm/bin/clang++ \
+    && test -d /opt/rocm/include \
+    && test -d /opt/rocm/lib
 
 WORKDIR /src
 COPY . .

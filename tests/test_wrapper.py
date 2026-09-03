@@ -39,6 +39,8 @@ class MatrixTests(unittest.TestCase):
             "dflash_server test_dflash test_server_unit", "llvm-objdump --offloading",
         ):
             self.assertIn(required, dockerfile)
+        for stale_package in ("hipblas-dev", "hipcub-dev", "rocblas-dev", "rocprim-dev", "rocwmma-dev"):
+            self.assertNotIn(stale_package, dockerfile)
 
 
 class ResolveTests(unittest.TestCase):
