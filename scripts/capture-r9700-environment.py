@@ -53,6 +53,7 @@ def capture(snapshot: str, hip_visible_devices: str) -> dict[str, Any]:
         "amd_smi_list": command_result(["amd-smi", "list", "--json"], parse_json=True),
         "amd_smi_static": command_result(["amd-smi", "static", "--json"], parse_json=True),
         "amd_smi_metric": command_result(["amd-smi", "metric", "--json"], parse_json=True),
+        "amd_smi_process": command_result(["amd-smi", "process", "--json"], parse_json=True),
         "rocm_smi": command_result(
             [
                 "rocm-smi",
@@ -82,6 +83,7 @@ def capture(snapshot: str, hip_visible_devices: str) -> dict[str, Any]:
         "amd_smi_list",
         "amd_smi_static",
         "amd_smi_metric",
+        "amd_smi_process",
         "rocm_smi",
         "amdgpu_module",
         "uptime",

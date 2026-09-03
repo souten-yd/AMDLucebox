@@ -279,6 +279,11 @@ class ModelEvidenceTests(unittest.TestCase):
         self.assertEqual(redacted["asic"]["asic_serial"], "REDACTED")
         self.assertEqual(redacted["asic"]["market_name"], "R9700")
 
+    def test_environment_capture_records_other_gpu_processes(self) -> None:
+        script = (ROOT / "scripts/capture-r9700-environment.py").read_text()
+        self.assertIn('"amd_smi_process"', script)
+        self.assertIn('["amd-smi", "process", "--json"]', script)
+
     def test_staged_model_manifest_verifies_content_and_release(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
