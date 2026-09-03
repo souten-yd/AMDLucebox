@@ -99,7 +99,7 @@ class ReleaseStateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             fake_bin = Path(directory)
             gh = fake_bin / "gh"
-            gh.write_text("#!/bin/sh\nexit \"${FAKE_GH_EXIT:-0}\"\n")
+            gh.write_text("#!/bin/sh\n[ \"${FAKE_GH_EXIT:-0}\" -eq 0 ] || exit \"$FAKE_GH_EXIT\"\nprintf '%s\\n' \"${FAKE_GH_PRERELEASE:-true}\"\n")
             gh.chmod(0o755)
             environment = os.environ.copy()
             environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
@@ -109,6 +109,21 @@ class ReleaseStateTests(unittest.TestCase):
                     cwd=ROOT, env=environment, check=True, text=True, capture_output=True,
                 )
                 self.assertIn(expected, result.stdout)
+
+    def test_stable_release_cannot_be_force_rebuilt(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fake_bin = Path(directory)
+            gh = fake_bin / "gh"
+            gh.write_text("#!/bin/sh\nprintf 'false\\n'\n")
+            gh.chmod(0o755)
+            environment = os.environ.copy()
+            environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
+            result = subprocess.run(
+                [str(ROOT / "scripts/check-release.sh"), "--repository", "owner/repo", "--tag", "tag", "--force", "true"],
+                cwd=ROOT, env=environment, check=False, text=True, capture_output=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("refusing to rebuild or replace assets for stable release", result.stderr)
 
     def test_missing_release_builds(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -466,6 +481,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("github.event_name != 'pull_request'", workflow)
         self.assertIn("github.event_name == 'pull_request' ||", workflow)
         self.assertIn("fail-fast: true", workflow)
+        self.assertNotIn("validated_release", workflow)
+        self.assertIn("prerelease: true", workflow)
 
     def test_actions_are_pinned(self) -> None:
         for workflow in (ROOT / ".github/workflows").glob("*.yml"):

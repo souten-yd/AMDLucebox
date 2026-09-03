@@ -33,10 +33,17 @@ Compare Candidate with Reference using the same upstream SHA, machine, weights,
 prompts, context/cache settings, clocks, and power/thermal state. Do not promote
 ROCm 10 if it regresses by more than 10% or fails functional validation.
 
-After successful evidence review, either rerun the release workflow with the
-same tag, `force_rebuild=true`, and `validated_release=true`, or mark the
-existing GitHub release non-prerelease without changing its assets. Never mark
-GPU/model validation passed when it did not execute.
+After successful evidence review, dispatch the dedicated `Promote validated
+release in place` workflow from trusted `main`. It verifies the existing
+package/checksum asset hashes, accepted Reference and Candidate runs, identical
+models/settings, and the Candidate regression gate; it then attaches the
+non-secret evidence bundle and changes only the existing release metadata to
+`prerelease=false`.
+
+The build workflow always publishes prereleases. It cannot promote a release,
+and it refuses to force-rebuild a release that is already stable. Never use a
+rebuild to clear the prerelease flag: a rebuild changes artifact identity and
+invalidates the model-backed evidence.
 
 ## Updating a container digest
 
