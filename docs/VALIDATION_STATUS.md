@@ -126,3 +126,67 @@ and package versions. Its SHA-256 is
 `f14653657df9e5ffc32254bc260da304a6d71a56d7399d618f2dcde8ed247d3e`.
 A full manifest-driven reread independently verified both production files.
 No GGUF or safetensors file is tracked by Git or uploaded to GitHub.
+
+## 2026-09-04 Production Acceptance Phase 4 — BLOCKED_EXTERNAL
+
+Repository and pinned upstream were rechecked at Phase 4 entry. AMDLucebox
+`main` is `91f94489b79bcc985c83aeee90fce8f1d1e72798`; the detached upstream
+checkout and recursive submodules remain exactly
+`298031aa4222ec61c971ed834ec8f8829ce37a5c`,
+`49d6c39e4dc0303442cda3bb758b3925d4399c49`, and
+`a75b4ac483166189a45290783cb0a18af5ff0ea5`.
+
+The initial model-backed Reference run exposed a benchmark-fidelity issue: the
+three generic wrapper prompts did not match the published Lucebox workload.
+[PR #11](https://github.com/souten-yd/AMDLucebox/pull/11) fixed the gate to use
+the exact ten-prompt HTTP HumanEval corpus from the pinned upstream
+`server/scripts/bench_he_http.py`, with the corpus SHA-256 recorded and enforced
+across Reference and Candidate. CI run
+[`33771166543`](https://github.com/souten-yd/AMDLucebox/actions/runs/33771166543)
+passed 21 tests and the change merged as `91f94489b79bcc985c83aeee90fce8f1d1e72798`.
+
+Trusted-main manual run
+[`33771223236`](https://github.com/souten-yd/AMDLucebox/actions/runs/33771223236)
+then passed every functional gate on the ROCm 7.2.4 Reference package:
+
+- ten of ten API requests generated successfully and reported speculative
+  decoding active
+- average server decode: `174.93 tok/s` (WARN; Phase 4 PASS is `>= 180`)
+- average client E2E: `143.435 tok/s`
+- average draft acceptance: `0.702321`
+- prompt corpus SHA-256:
+  `e317321b7e26a48335860288b5bb9dc8666403d2c877f6043b10727f18dceb0c`
+- model verification, release checksum, package verification, runtime `ldd`,
+  HIP smoke, and all 447 packaged server tests: PASS
+- evidence artifact ID `9899701873`, 59,175 bytes; benchmark JSON SHA-256
+  `818fa8d0e5d5fa814abc37d08d366ee050fc99e8b8328899be3cb38ac9514c79`
+
+The WARN result was investigated before proceeding. During the measured load,
+the R9700 reached 98% GPU activity, 2,732 MHz GFX, and exactly the configured
+210 W socket-power cap; hotspot temperature was only 71 C against the 110 C
+slowdown limit. The device reports a 210 W minimum and 300 W maximum cap. This
+host is therefore power-limited at the minimum board setting, rather than
+thermally limited, while the published result was taken on the stock R9700
+profile. The current non-root Codex/runner accounts cannot change that
+root-owned setting.
+
+External prerequisite and exact operator action:
+
+```bash
+sudo amd-smi set --gpu 0 --power-cap ppt0 300
+amd-smi static --gpu 0 --limit --json
+```
+
+After the output confirms `socket_power_limit` is 300 W, resume with:
+
+```bash
+gh workflow run validate-r9700.yml --repo souten-yd/AMDLucebox --ref main \
+  -f release_tag=lucebox-298031aa-r1 -f track=reference \
+  -f model_backed=true -f model_dir=/data1tb/LLM/AMDLucebox/qwen38 \
+  -f hip_visible_devices=0 -f benchmark_warmups=3 \
+  -f benchmark_max_tokens=256
+```
+
+Phase 4 remains incomplete until the canonical Reference benchmark status is
+PASS. Phase 5 must not use the WARN run as its comparison baseline. The release
+remains a prerelease and its three existing asset digests are unchanged.
