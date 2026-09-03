@@ -73,7 +73,7 @@ against the same pinned Lucebox checkout used for the build:
 ```bash
 scripts/prepare-qwen38.sh \
   --lucebox-source /path/to/pinned/lucebox \
-  --model-dir /var/lib/amdlucebox/models/qwen38
+  --model-dir /data1tb/LLM/AMDLucebox/qwen38
 ```
 
 The helper currently uses upstream's `convert_dflash_to_gguf.py` followed by
@@ -84,8 +84,8 @@ Launch the measured profile directly:
 
 ```bash
 ./server/build/dflash_server \
-  /var/lib/amdlucebox/models/qwen38/Qwen3.8-27B-UD-IQ4_XS.gguf \
-  --draft /var/lib/amdlucebox/models/qwen38/qwen38-dflash2-q8_0.gguf \
+  /data1tb/LLM/AMDLucebox/qwen38/Qwen3.8-27B-UD-IQ4_XS.gguf \
+  --draft /data1tb/LLM/AMDLucebox/qwen38/qwen38-dflash2-q8_0.gguf \
   --draft-block-size 16 --max-ctx 131072 \
   --cache-type-k q8_0 --cache-type-v q8_0 --port 8216
 ```
@@ -114,8 +114,8 @@ shutdown, and benchmark capture:
 ```bash
 scripts/run-qwen38-r9700.sh \
   --binary ./lucebox-r9700/server/build/dflash_server \
-  --model /var/lib/amdlucebox/models/qwen38/Qwen3.8-27B-UD-IQ4_XS.gguf \
-  --draft /var/lib/amdlucebox/models/qwen38/qwen38-dflash2-q8_0.gguf \
+  --model /data1tb/LLM/AMDLucebox/qwen38/Qwen3.8-27B-UD-IQ4_XS.gguf \
+  --draft /data1tb/LLM/AMDLucebox/qwen38/qwen38-dflash2-q8_0.gguf \
   --output benchmark-r9700.json
 ```
 

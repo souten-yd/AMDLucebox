@@ -134,10 +134,11 @@ Store the validation artifact/run URL in `VALIDATION_STATUS.md`.
 
 Use a pinned checkout of upstream Lucebox matching the release under test (`298031aa4222ec61c971ed834ec8f8829ce37a5c`) when running conversion scripts.
 
-Target location:
+Target location on the current acceptance host (operator-selected external
+storage; this overrides the earlier example under `/var/lib`):
 
 ```text
-/var/lib/amdlucebox/models/qwen38/
+/data1tb/LLM/AMDLucebox/qwen38/
 ├── Qwen3.8-27B-UD-IQ4_XS.gguf
 └── qwen38-dflash2-q8_0.gguf
 ```

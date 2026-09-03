@@ -22,9 +22,9 @@ untrusted build workflow. Review changes to the validation script before using
 the host.
 
 The runner downloads already-published packages with read permission. It does
-not compile arbitrary PR source. Model weights are staged separately by the
-operator under a path such as `/var/lib/amdlucebox/models/qwen38` and must never
-be placed in the Actions workspace or uploaded as evidence.
+not compile arbitrary PR source. On the current host, model weights are staged
+separately under `/data1tb/LLM/AMDLucebox/qwen38` and must never be placed in
+the Actions workspace or uploaded as evidence.
 
 ## Initial acceptance
 
@@ -41,7 +41,7 @@ presence alone is insufficient.
 For model-backed validation, stage:
 
 ```text
-/var/lib/amdlucebox/models/qwen38/
+/data1tb/LLM/AMDLucebox/qwen38/
 ├── Qwen3.8-27B-UD-IQ4_XS.gguf
 └── qwen38-dflash2-q8_0.gguf
 ```
