@@ -1,0 +1,89 @@
+name: Validate release on R9700
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing AMDLucebox release tag
+        required: true
+        type: string
+      track:
+        description: ROCm build track to validate
+        default: reference
+        required: true
+        type: choice
+        options: [reference, candidate]
+      model_backed:
+        description: Run Qwen3.8 and DFlash2 using already-staged weights
+        default: false
+        required: true
+        type: boolean
+      model_dir:
+        description: Trusted runner path containing staged Qwen3.8 weights
+        default: /var/lib/amdlucebox/models/qwen38
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: amdlucebox-r9700-validation
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: [self-hosted, linux, x64, r9700, gfx1201]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: R9700 and KFD preflight
+        run: scripts/preflight-r9700.sh "$RUNNER_TEMP/r9700-diagnostics"
+      - name: Download release package and checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          TRACK: ${{ inputs.track }}
+        run: |
+          rocm=$(python3 - "$TRACK" <<'PY'
+          import json, sys
+          tracks = json.load(open("config/build-matrix.json"))["tracks"]
+          print(next(item["rocm_version"] for item in tracks if item["name"] == sys.argv[1]))
+          PY
+          )
+          mkdir -p "$RUNNER_TEMP/amdlucebox-release"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/amdlucebox-release" --pattern "*rocm${rocm}-gfx1201-*.tar.zst" --pattern SHA256SUMS
+          cd "$RUNNER_TEMP/amdlucebox-release"
+          archive=$(find . -maxdepth 1 -name '*.tar.zst' -print -quit)
+          grep -F " $(basename "$archive")" SHA256SUMS | sha256sum -c -
+          scripts_path="$GITHUB_WORKSPACE/scripts/verify-package.sh"
+          "$scripts_path" "$archive"
+          mkdir extracted
+          tar --zstd -xf "$archive" -C extracted
+          echo "PACKAGE_ROOT=$RUNNER_TEMP/amdlucebox-release/extracted/lucebox-r9700" >> "$GITHUB_ENV"
+      - name: Check host runtime dependencies
+        run: |
+          ldd "$PACKAGE_ROOT/server/build/dflash_server" | tee "$RUNNER_TEMP/runtime-ldd.txt"
+          ! grep -F 'not found' "$RUNNER_TEMP/runtime-ldd.txt"
+      - name: Qwen3.8 DFlash2 functional and performance validation
+        if: inputs.model_backed
+        env:
+          MODEL_DIR: ${{ inputs.model_dir }}
+        run: |
+          scripts/run-qwen38-r9700.sh \
+            --binary "$PACKAGE_ROOT/server/build/dflash_server" \
+            --model "$MODEL_DIR/Qwen3.8-27B-UD-IQ4_XS.gguf" \
+            --draft "$MODEL_DIR/qwen38-dflash2-q8_0.gguf" \
+            --output "$RUNNER_TEMP/benchmark-r9700.json"
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: r9700-validation-${{ inputs.release_tag }}-${{ inputs.track }}
+          path: |
+            ${{ runner.temp }}/r9700-diagnostics
+            ${{ runner.temp }}/runtime-ldd.txt
+            ${{ runner.temp }}/benchmark-r9700.json
+            ${{ runner.temp }}/benchmark-r9700.server.log
+          if-no-files-found: warn
+          retention-days: 30
