@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import statistics
 import sys
@@ -14,11 +15,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-DEFAULT_PROMPTS = [
-    "Write a Python function that returns the nth Fibonacci number.",
-    "Implement binary search over a sorted list and explain its complexity.",
-    "Write a function that validates balanced parentheses in a string.",
-]
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_PROMPTS_PATH = REPO_ROOT / "benchmarks/qwen38-humaneval-10.json"
+
+
+def load_prompts(path: Path) -> tuple[list[str], str]:
+    raw = path.read_bytes()
+    prompts = json.loads(raw)
+    if not isinstance(prompts, list) or not prompts or not all(isinstance(prompt, str) for prompt in prompts):
+        raise ValueError("prompts JSON must be a non-empty string array")
+    return prompts, hashlib.sha256(raw).hexdigest()
 
 
 def request_json(url: str, payload: dict[str, Any], timeout: float) -> tuple[dict[str, Any], float]:
@@ -137,7 +143,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:8216")
     parser.add_argument("--output", default="benchmark-r9700.json")
-    parser.add_argument("--prompts-json")
+    parser.add_argument("--prompts-json", default=str(DEFAULT_PROMPTS_PATH))
     parser.add_argument("--max-tokens", type=int, default=256)
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--timeout", type=float, default=300)
@@ -150,11 +156,10 @@ def main() -> int:
         parser.error("--fail-tps must not exceed --pass-tps")
     if args.max_tokens <= 0 or args.warmups < 0:
         parser.error("--max-tokens must be positive and --warmups cannot be negative")
-    prompts = DEFAULT_PROMPTS
-    if args.prompts_json:
-        prompts = json.loads(Path(args.prompts_json).read_text(encoding="utf-8"))
-        if not isinstance(prompts, list) or not prompts or not all(isinstance(p, str) for p in prompts):
-            parser.error("prompts JSON must be a non-empty string array")
+    try:
+        prompts, prompts_sha256 = load_prompts(Path(args.prompts_json))
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        parser.error(str(error))
 
     payload: dict[str, Any] = {
         "messages": [{"role": "user", "content": ""}],
@@ -184,6 +189,9 @@ def main() -> int:
         "measured_at_utc": datetime.now(timezone.utc).isoformat(),
         "primary_measurement": "server_decode_tokens_per_second",
         "settings": {
+            "prompt_corpus": str(Path(args.prompts_json)),
+            "prompt_corpus_sha256": prompts_sha256,
+            "prompt_count": len(prompts),
             "max_tokens": args.max_tokens,
             "warmup_request_count": args.warmups,
             "thresholds": {"pass": args.pass_tps, "fail_below": args.fail_tps},
