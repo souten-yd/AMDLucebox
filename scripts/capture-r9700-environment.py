@@ -46,17 +46,18 @@ def command_result(command: list[str], parse_json: bool = False) -> dict[str, An
 
 
 def capture(snapshot: str, hip_visible_devices: str) -> dict[str, Any]:
+    rocm_root = Path(os.environ.get("ROCM_PATH", "/opt/rocm")).resolve()
     commands = {
         "uname": command_result(["uname", "-a"]),
-        "hipcc_version": command_result(["/opt/rocm/bin/hipcc", "--version"]),
-        "amd_smi_version": command_result(["amd-smi", "version"]),
-        "amd_smi_list": command_result(["amd-smi", "list", "--json"], parse_json=True),
-        "amd_smi_static": command_result(["amd-smi", "static", "--json"], parse_json=True),
-        "amd_smi_metric": command_result(["amd-smi", "metric", "--json"], parse_json=True),
-        "amd_smi_process": command_result(["amd-smi", "process", "--json"], parse_json=True),
+        "hipcc_version": command_result([str(rocm_root / "bin/hipcc"), "--version"]),
+        "amd_smi_version": command_result([str(rocm_root / "bin/amd-smi"), "version"]),
+        "amd_smi_list": command_result([str(rocm_root / "bin/amd-smi"), "list", "--json"], parse_json=True),
+        "amd_smi_static": command_result([str(rocm_root / "bin/amd-smi"), "static", "--json"], parse_json=True),
+        "amd_smi_metric": command_result([str(rocm_root / "bin/amd-smi"), "metric", "--json"], parse_json=True),
+        "amd_smi_process": command_result([str(rocm_root / "bin/amd-smi"), "process", "--json"], parse_json=True),
         "rocm_smi": command_result(
             [
-                "rocm-smi",
+                str(rocm_root / "bin/rocm-smi"),
                 "--showproductname",
                 "--showpower",
                 "--showclocks",
@@ -75,7 +76,7 @@ def capture(snapshot: str, hip_visible_devices: str) -> dict[str, Any]:
         ),
     }
     os_release = Path("/etc/os-release").read_text(encoding="utf-8")
-    rocm_version_path = Path("/opt/rocm/.info/version")
+    rocm_version_path = rocm_root / ".info/version"
     required = (
         "uname",
         "hipcc_version",
@@ -99,6 +100,7 @@ def capture(snapshot: str, hip_visible_devices: str) -> dict[str, Any]:
         "runner_os": os.environ.get("RUNNER_OS"),
         "runner_arch": os.environ.get("RUNNER_ARCH"),
         "os_release": os_release,
+        "rocm_runtime_root": str(rocm_root),
         "rocm_userspace_version": rocm_version_path.read_text(encoding="utf-8").strip(),
         "commands": commands,
         "failed_required_commands": failed,

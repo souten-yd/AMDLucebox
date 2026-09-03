@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import signal
 import subprocess
 import time
@@ -32,8 +33,9 @@ def stop(_signum: int, _frame: object) -> None:
 
 
 def read_metric() -> dict[str, object]:
+    amd_smi = Path(os.environ.get("ROCM_PATH", "/opt/rocm")) / "bin/amd-smi"
     completed = subprocess.run(
-        ["amd-smi", "metric", "--json"], text=True, capture_output=True, timeout=30, check=False
+        [str(amd_smi), "metric", "--json"], text=True, capture_output=True, timeout=30, check=False
     )
     sample: dict[str, object] = {
         "captured_at_utc": datetime.now(timezone.utc).isoformat(),
