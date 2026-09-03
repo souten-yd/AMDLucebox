@@ -219,7 +219,13 @@ class BenchmarkTests(unittest.TestCase):
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_POST(self) -> None:  # noqa: N802
                 length = int(self.headers["Content-Length"])
-                self.rfile.read(length)
+                request = json.loads(self.rfile.read(length))
+                if self.path != "/v1/chat/completions":
+                    self.send_error(404)
+                    return
+                if request.get("messages") != [{"role": "user", "content": "test"}]:
+                    self.send_error(400)
+                    return
                 body = json.dumps({
                     "choices": [{"text": "ok"}],
                     "usage": {
