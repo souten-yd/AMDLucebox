@@ -20,11 +20,6 @@ on:
         default: "1"
         required: true
         type: string
-      validated_release:
-        description: Publish as a normal release only after real R9700 validation
-        default: false
-        required: true
-        type: boolean
   schedule:
     - cron: "31 17 * * *"
 
@@ -46,7 +41,6 @@ jobs:
       release_tag: ${{ steps.meta.outputs.release_tag }}
       should_build: ${{ steps.release.outputs.should_build }}
       matrix: ${{ steps.matrix.outputs.matrix }}
-      prerelease: ${{ steps.meta.outputs.prerelease }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Resolve exact upstream commit
@@ -59,11 +53,9 @@ jobs:
         env:
           SHORT_SHA: ${{ steps.resolve.outputs.upstream_short_sha }}
           REQUESTED_REVISION: ${{ github.event_name == 'workflow_dispatch' && inputs.release_revision || '1' }}
-          VALIDATED: ${{ github.event_name == 'workflow_dispatch' && inputs.validated_release || false }}
         run: |
           [[ "$REQUESTED_REVISION" =~ ^[1-9][0-9]*$ ]] || { echo "invalid release revision" >&2; exit 1; }
           echo "release_tag=lucebox-${SHORT_SHA}-r${REQUESTED_REVISION}" >> "$GITHUB_OUTPUT"
-          if [[ "$VALIDATED" == true ]]; then echo "prerelease=false" >> "$GITHUB_OUTPUT"; else echo "prerelease=true" >> "$GITHUB_OUTPUT"; fi
       - name: Suppress duplicate release
         id: release
         env:
@@ -125,7 +117,7 @@ jobs:
         with:
           tag_name: ${{ needs.resolve-upstream.outputs.release_tag }}
           name: Lucebox R9700 gfx1201 — upstream ${{ needs.resolve-upstream.outputs.upstream_short_sha }}
-          prerelease: ${{ needs.resolve-upstream.outputs.prerelease }}
+          prerelease: true
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |

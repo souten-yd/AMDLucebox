@@ -20,8 +20,18 @@ done
 command -v gh >/dev/null || { echo "error: gh is required" >&2; exit 1; }
 
 release_exists=false
-if gh release view "$tag" --repo "$repository" >/dev/null 2>&1; then
+release_is_prerelease=""
+if release_is_prerelease=$(gh release view "$tag" --repo "$repository" \
+  --json isPrerelease --jq .isPrerelease 2>/dev/null); then
   release_exists=true
+fi
+if [[ $release_exists == true && $release_is_prerelease != true && $release_is_prerelease != false ]]; then
+  echo "error: release returned an invalid prerelease state" >&2
+  exit 1
+fi
+if [[ $release_exists == true && $release_is_prerelease == false && $force == true ]]; then
+  echo "error: refusing to rebuild or replace assets for stable release $tag" >&2
+  exit 1
 fi
 should_build=true
 if [[ $release_exists == true && $force == false ]]; then
