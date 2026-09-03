@@ -170,6 +170,18 @@ thermally limited, while the published result was taken on the stock R9700
 profile. The current non-root Codex/runner accounts cannot change that
 root-owned setting.
 
+A same-head reproducibility run was performed before concluding that privileged
+intervention was required. Trusted-main run
+[`33772011305`](https://github.com/souten-yd/AMDLucebox/actions/runs/33772011305)
+again completed every functional gate and all ten speculative requests, but
+measured `171.39 tok/s` server decode and `140.746 tok/s` client E2E. Its mean
+acceptance was byte-for-byte identical at `0.702321`; three loaded samples were
+again at 210 W, 95–97% GPU activity, and 2,722–2,768 MHz, with a maximum hotspot
+temperature of 72 C. Evidence artifact ID `9900030035` is 59,249 bytes. Two
+canonical runs therefore reproduce the sub-180 result under the minimum power
+cap (`174.93` and `171.39 tok/s`); additional unchanged reruns are not accepted
+as remediation.
+
 External prerequisite and exact operator action:
 
 ```bash
