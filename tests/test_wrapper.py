@@ -452,6 +452,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("--metrics-output", workflow)
         self.assertIn("reference_run_id", workflow)
         self.assertIn("benchmark-reference-input.json", workflow)
+        self.assertIn("reference-environment-before.json", workflow)
         self.assertIn("reference-candidate-input-check.json", workflow)
         self.assertIn("retention-days: 90", workflow)
 
