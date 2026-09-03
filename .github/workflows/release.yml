@@ -1,0 +1,133 @@
+name: Build and publish upstream release
+
+on:
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: Upstream branch, tag, or full commit
+        default: main
+        required: true
+        type: string
+      force_rebuild:
+        description: Rebuild and replace assets when the release tag already exists
+        default: false
+        required: true
+        type: boolean
+      release_revision:
+        description: AMDLucebox package revision
+        default: "1"
+        required: true
+        type: string
+      validated_release:
+        description: Publish as a normal release only after real R9700 validation
+        default: false
+        required: true
+        type: boolean
+  schedule:
+    - cron: "31 17 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: amdlucebox-upstream-release
+  cancel-in-progress: false
+
+jobs:
+  resolve-upstream:
+    if: github.event_name != 'pull_request' || github.event.label.name == 'full-rocm-build'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      upstream_sha: ${{ steps.resolve.outputs.upstream_sha }}
+      upstream_short_sha: ${{ steps.resolve.outputs.upstream_short_sha }}
+      release_tag: ${{ steps.meta.outputs.release_tag }}
+      should_build: ${{ steps.release.outputs.should_build }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Resolve exact upstream commit
+        id: resolve
+        env:
+          REQUESTED_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.upstream_ref || 'main' }}
+        run: scripts/resolve-upstream.sh --ref "$REQUESTED_REF" --github-output "$GITHUB_OUTPUT"
+      - name: Set release metadata
+        id: meta
+        env:
+          SHORT_SHA: ${{ steps.resolve.outputs.upstream_short_sha }}
+          REQUESTED_REVISION: ${{ github.event_name == 'workflow_dispatch' && inputs.release_revision || '1' }}
+          VALIDATED: ${{ github.event_name == 'workflow_dispatch' && inputs.validated_release || false }}
+        run: |
+          [[ "$REQUESTED_REVISION" =~ ^[1-9][0-9]*$ ]] || { echo "invalid release revision" >&2; exit 1; }
+          echo "release_tag=lucebox-${SHORT_SHA}-r${REQUESTED_REVISION}" >> "$GITHUB_OUTPUT"
+          if [[ "$VALIDATED" == true ]]; then echo "prerelease=false" >> "$GITHUB_OUTPUT"; else echo "prerelease=true" >> "$GITHUB_OUTPUT"; fi
+      - name: Suppress duplicate release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.meta.outputs.release_tag }}
+          FORCE_REBUILD: ${{ github.event_name == 'workflow_dispatch' && inputs.force_rebuild || false }}
+        run: scripts/check-release.sh --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --force "$FORCE_REBUILD" --github-output "$GITHUB_OUTPUT"
+      - name: Load build matrix
+        id: matrix
+        run: echo "matrix=$(python3 -c 'import json; print(json.dumps(json.load(open("config/build-matrix.json"))["tracks"], separators=(",", ":")))')" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: resolve-upstream
+    if: needs.resolve-upstream.outputs.should_build == 'true'
+    strategy:
+      # A failed track makes the release unusable; cancel its expensive sibling
+      # promptly and rerun both only after the root cause is fixed.
+      fail-fast: true
+      matrix:
+        include: ${{ fromJSON(needs.resolve-upstream.outputs.matrix) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Build pinned ${{ matrix.name }} track
+        run: scripts/build.sh --track "${{ matrix.name }}" --upstream-ref "${{ needs.resolve-upstream.outputs.upstream_sha }}" --output-dir dist
+      - name: Upload verified package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: package-${{ matrix.name }}
+          path: |
+            dist/${{ matrix.name }}/*.tar.zst
+            dist/${{ matrix.name }}/*.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [resolve-upstream, build]
+    if: github.event_name != 'pull_request' && needs.resolve-upstream.outputs.should_build == 'true' && needs.build.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: package-*
+          path: release-assets
+          merge-multiple: true
+      - name: Verify and consolidate checksums
+        working-directory: release-assets
+        run: |
+          for checksum in *.sha256; do sha256sum -c "$checksum"; done
+          cat -- *.sha256 | sort -k2 > SHA256SUMS
+      - name: Publish release
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
+        with:
+          tag_name: ${{ needs.resolve-upstream.outputs.release_tag }}
+          name: Lucebox R9700 gfx1201 — upstream ${{ needs.resolve-upstream.outputs.upstream_short_sha }}
+          prerelease: ${{ needs.resolve-upstream.outputs.prerelease }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            release-assets/*.tar.zst
+            release-assets/SHA256SUMS

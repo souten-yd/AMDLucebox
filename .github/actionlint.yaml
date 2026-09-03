@@ -1,0 +1,4 @@
+self-hosted-runner:
+  labels:
+    - r9700
+    - gfx1201

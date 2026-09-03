@@ -1,0 +1,74 @@
+# syntax=docker/dockerfile:1.7
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE} AS builder
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG LLVM_TARGET=gfx1201
+ENV ROCM_PATH=/opt/rocm
+ENV PATH=/opt/rocm/bin:/opt/rocm/lib/llvm/bin:${PATH}
+
+RUN test "$LLVM_TARGET" = gfx1201
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential ca-certificates cmake curl file git git-lfs \
+      libcurl4-openssl-dev ninja-build pkg-config python3 zstd \
+    && rm -rf /var/lib/apt/lists/*
+
+# The pinned `complete` / `full` images carry the ROCm SDK. ROCm 10 no longer
+# exposes the ROCm 7 `*-dev` package names through the image's configured APT
+# source, so validate the SDK itself instead of reinstalling stale package names.
+RUN command -v hipcc \
+    && test -x /opt/rocm/lib/llvm/bin/clang++ \
+    && test -d /opt/rocm/include \
+    && test -d /opt/rocm/lib
+
+WORKDIR /src
+COPY . .
+RUN test -f server/deps/llama.cpp/ggml/CMakeLists.txt
+RUN cmake -S server -B server/build -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
+      -DCMAKE_HIP_COMPILER=/opt/rocm/lib/llvm/bin/clang++ \
+      -DDFLASH27B_GPU_BACKEND=hip \
+      -DDFLASH27B_HIP_ARCHITECTURES=${LLVM_TARGET} \
+      -DDFLASH27B_FA_ALL_QUANTS=OFF \
+      -DDFLASH27B_ENABLE_BSA=OFF \
+      -DGGML_HIP_MMQ_MFMA=ON \
+      -DGGML_HIP_NO_VMM=ON \
+    && cmake --build server/build --target dflash_server test_dflash test_server_unit --parallel
+
+RUN set -eu; \
+    test -x server/build/dflash_server; \
+    grep -Eq '^CMAKE_HIP_ARCHITECTURES(:[^=]+)?=gfx1201$' server/build/CMakeCache.txt; \
+    mkdir -p /verification; \
+    { file server/build/dflash_server; ldd server/build/dflash_server; readelf -d server/build/dflash_server; } \
+      > /verification/DEPENDENCIES.txt 2>&1; \
+    ! grep -F 'not found' /verification/DEPENDENCIES.txt; \
+    { hipcc --version; /opt/rocm/lib/llvm/bin/clang++ --version; cmake --version; } \
+      > /verification/TOOLCHAIN.txt 2>&1; \
+    cp server/build/CMakeCache.txt /verification/CMAKE_CACHE.txt; \
+    hip_lib=$(find server/build -type f -name 'libggml-hip.so*' -print -quit); \
+    test -n "$hip_lib"; \
+    if command -v llvm-objdump >/dev/null 2>&1; then \
+      llvm-objdump --offloading "$hip_lib" > /verification/OFFLOAD.txt 2>&1 || \
+      llvm-objdump -h "$hip_lib" > /verification/OFFLOAD.txt 2>&1; \
+    else \
+      readelf -S "$hip_lib" > /verification/OFFLOAD.txt 2>&1; \
+    fi; \
+    grep -F gfx1201 /verification/OFFLOAD.txt
+
+RUN mkdir -p /artifact/server/build /artifact/LICENSES /artifact/verification \
+    && cp server/build/dflash_server server/build/test_dflash server/build/test_server_unit \
+      /artifact/server/build/ \
+    && if [ -d server/build/share ]; then cp -a server/build/share /artifact/server/build/share; fi \
+    && cd server/build \
+    && find deps \( -type f -o -type l \) -name 'lib*.so*' \
+      -exec cp -a --parents '{}' /artifact/server/build/ \; \
+    && cd /src \
+    && cp -a server/scripts /artifact/server/scripts \
+    && cp -a server/share /artifact/server/share \
+    && cp LICENSE /artifact/LICENSES/LUCEBOX-LICENSE \
+    && cp server/deps/llama.cpp/LICENSE /artifact/LICENSES/llama.cpp-LICENSE \
+    && cp -a /verification/. /artifact/verification/
+
+FROM scratch AS artifact
+COPY --from=builder /artifact/ /

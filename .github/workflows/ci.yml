@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wrapper-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Validate shell syntax
+        run: bash -n scripts/*.sh
+      - name: Validate JSON
+        run: python3 -m json.tool config/build-matrix.json >/dev/null
+      - name: Run deterministic tests
+        run: python3 -m unittest discover -s tests -v
+      - name: Reject committed model weights
+        run: |
+          if git ls-files | grep -Ei '\.(gguf|safetensors)$'; then
+            echo "Model weights must not be committed" >&2
+            exit 1
+          fi
+      - name: Check whitespace
+        run: git show --check --format= HEAD
