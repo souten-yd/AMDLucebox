@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import http.server
+import importlib.util
 import json
 import os
 import subprocess
@@ -11,6 +12,10 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+BENCHMARK_SPEC = importlib.util.spec_from_file_location("benchmark_r9700", ROOT / "scripts/benchmark-r9700.py")
+assert BENCHMARK_SPEC and BENCHMARK_SPEC.loader
+BENCHMARK = importlib.util.module_from_spec(BENCHMARK_SPEC)
+BENCHMARK_SPEC.loader.exec_module(BENCHMARK)
 
 
 def run(*args: str, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -145,12 +150,73 @@ class PackageTests(unittest.TestCase):
 
 
 class BenchmarkTests(unittest.TestCase):
+    def test_response_parsing_uses_server_timings(self) -> None:
+        parsed = BENCHMARK.parse_response(
+            {
+                "usage": {
+                    "completion_tokens": 180,
+                    "timings": {"decode_tokens_per_sec": 205.5, "decode_ms": 875.9, "prefill_ms": 42.0},
+                    "spec_decode_ran": True,
+                    "accept_rate": 0.73,
+                }
+            },
+            elapsed=1.0,
+            prompt="test",
+        )
+        self.assertEqual(parsed["server_decode_tokens_per_second"], 205.5)
+        self.assertEqual(parsed["client_e2e_tokens_per_second"], 180.0)
+        self.assertEqual(parsed["prefill_milliseconds"], 42.0)
+        self.assertEqual(parsed["decode_milliseconds"], 875.9)
+        self.assertIs(parsed["speculative_decode_ran"], True)
+        self.assertEqual(parsed["acceptance_rate"], 0.73)
+
+    def test_missing_server_timings_and_spec_decode_fail(self) -> None:
+        parsed = BENCHMARK.parse_response(
+            {"usage": {"completion_tokens": 10}}, elapsed=2.0, prompt="test"
+        )
+        aggregate, status, reasons = BENCHMARK.summarize_runs([parsed], 180.0, 170.0)
+        self.assertEqual(status, "fail")
+        self.assertIsNone(aggregate["average_server_decode_tokens_per_second"])
+        self.assertEqual(aggregate["speculative_decode_request_fraction"], 0.0)
+        self.assertEqual(len(reasons), 2)
+
+    def test_thresholds_and_reference_comparison_use_server_decode(self) -> None:
+        def measured(server_tps: float) -> dict[str, object]:
+            return {
+                "server_decode_tokens_per_second": server_tps,
+                "client_e2e_tokens_per_second": 999.0,
+                "acceptance_rate": 0.5,
+                "speculative_decode_ran": True,
+            }
+
+        aggregate, status, _ = BENCHMARK.summarize_runs([measured(175.0)], 180.0, 170.0)
+        self.assertEqual(status, "warn")
+        self.assertEqual(aggregate["average_server_decode_tokens_per_second"], 175.0)
+        _, status, reasons = BENCHMARK.summarize_runs(
+            [measured(179.9)], 180.0, 170.0, reference_tps=200.0, max_regression_percent=10.0
+        )
+        self.assertEqual(status, "fail")
+        self.assertIn("candidate exceeded the maximum Reference regression", reasons)
+        aggregate, status, _ = BENCHMARK.summarize_runs(
+            [measured(180.0)], 180.0, 170.0, reference_tps=200.0, max_regression_percent=10.0
+        )
+        self.assertEqual(status, "pass")
+        self.assertTrue(aggregate["reference_comparison"]["passed"])
+
     def test_benchmark_writes_machine_readable_result(self) -> None:
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_POST(self) -> None:  # noqa: N802
                 length = int(self.headers["Content-Length"])
                 self.rfile.read(length)
-                body = json.dumps({"choices": [{"text": "ok"}], "usage": {"completion_tokens": 10}}).encode()
+                body = json.dumps({
+                    "choices": [{"text": "ok"}],
+                    "usage": {
+                        "completion_tokens": 10,
+                        "timings": {"decode_tokens_per_sec": 200.0, "decode_ms": 50.0, "prefill_ms": 5.0},
+                        "spec_decode_ran": True,
+                        "accept_rate": 0.5,
+                    },
+                }).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(body)))
@@ -172,10 +238,13 @@ class BenchmarkTests(unittest.TestCase):
                     "python3", str(ROOT / "scripts/benchmark-r9700.py"),
                     "--base-url", f"http://127.0.0.1:{server.server_port}",
                     "--prompts-json", str(prompts), "--output", str(output),
-                    "--pass-tps", "0", "--fail-tps", "0",
+                    "--pass-tps", "180", "--fail-tps", "170",
                 )
                 result = json.loads(output.read_text())
                 self.assertEqual(result["status"], "pass")
+                self.assertEqual(result["schema_version"], 2)
+                self.assertEqual(result["primary_measurement"], "server_decode_tokens_per_second")
+                self.assertEqual(result["aggregate"]["average_server_decode_tokens_per_second"], 200.0)
                 self.assertEqual(result["runs"][0]["completion_tokens"], 10)
         finally:
             server.shutdown()
@@ -191,6 +260,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn("pull_request", trigger)
         self.assertIn("runs-on: [self-hosted, linux, x64, r9700, gfx1201]", workflow)
         self.assertIn("server/build/test_server_unit", workflow)
+        self.assertIn("HIP_VISIBLE_DEVICES: ${{ inputs.hip_visible_devices }}", workflow)
+        self.assertIn('default: "0"', workflow)
 
     def test_build_jobs_have_read_only_permissions(self) -> None:
         workflow = (ROOT / ".github/workflows/release.yml").read_text()
@@ -200,6 +271,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("schedule:", workflow)
         self.assertIn("github.event.label.name == 'full-rocm-build'", workflow)
         self.assertIn("github.event_name != 'pull_request'", workflow)
+        self.assertIn("github.event_name == 'pull_request' ||", workflow)
         self.assertIn("fail-fast: true", workflow)
 
     def test_actions_are_pinned(self) -> None:
