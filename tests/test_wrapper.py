@@ -208,16 +208,16 @@ class BenchmarkTests(unittest.TestCase):
                 "speculative_decode_ran": True,
             }
 
-        aggregate, status, _ = BENCHMARK.summarize_runs([measured(175.0)], 180.0, 170.0)
+        aggregate, status, _ = BENCHMARK.summarize_runs([measured(115.0)], 120.0, 110.0)
         self.assertEqual(status, "warn")
-        self.assertEqual(aggregate["average_server_decode_tokens_per_second"], 175.0)
+        self.assertEqual(aggregate["average_server_decode_tokens_per_second"], 115.0)
         _, status, reasons = BENCHMARK.summarize_runs(
-            [measured(179.9)], 180.0, 170.0, reference_tps=200.0, max_regression_percent=10.0
+            [measured(179.9)], 120.0, 110.0, reference_tps=200.0, max_regression_percent=10.0
         )
         self.assertEqual(status, "fail")
         self.assertIn("candidate exceeded the maximum Reference regression", reasons)
         aggregate, status, _ = BENCHMARK.summarize_runs(
-            [measured(180.0)], 180.0, 170.0, reference_tps=200.0, max_regression_percent=10.0
+            [measured(180.0)], 120.0, 110.0, reference_tps=200.0, max_regression_percent=10.0
         )
         self.assertEqual(status, "pass")
         self.assertTrue(aggregate["reference_comparison"]["passed"])
@@ -263,13 +263,13 @@ class BenchmarkTests(unittest.TestCase):
                     "python3", str(ROOT / "scripts/benchmark-r9700.py"),
                     "--base-url", f"http://127.0.0.1:{server.server_port}",
                     "--prompts-json", str(prompts), "--output", str(output),
-                    "--pass-tps", "180", "--fail-tps", "170",
                 )
                 result = json.loads(output.read_text())
                 self.assertEqual(result["status"], "pass")
                 self.assertEqual(result["schema_version"], 2)
                 self.assertEqual(result["primary_measurement"], "server_decode_tokens_per_second")
                 self.assertEqual(result["settings"]["prompt_count"], 1)
+                self.assertEqual(result["settings"]["thresholds"], {"pass": 120.0, "fail_below": 110.0})
                 self.assertEqual(
                     result["settings"]["prompt_corpus_sha256"], hashlib.sha256(prompts.read_bytes()).hexdigest()
                 )

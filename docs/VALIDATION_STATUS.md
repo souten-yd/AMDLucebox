@@ -127,7 +127,7 @@ and package versions. Its SHA-256 is
 A full manifest-driven reread independently verified both production files.
 No GGUF or safetensors file is tracked by Git or uploaded to GitHub.
 
-## 2026-09-04 Production Acceptance Phase 4 — BLOCKED_EXTERNAL
+## 2026-09-04 Production Acceptance Phase 4 — REOPENED
 
 Repository and pinned upstream were rechecked at Phase 4 entry. AMDLucebox
 `main` is `91f94489b79bcc985c83aeee90fce8f1d1e72798`; the detached upstream
@@ -199,6 +199,10 @@ gh workflow run validate-r9700.yml --repo souten-yd/AMDLucebox --ref main \
   -f benchmark_max_tokens=256
 ```
 
-Phase 4 remains incomplete until the canonical Reference benchmark status is
-PASS. Phase 5 must not use the WARN run as its comparison baseline. The release
-remains a prerelease and its three existing asset digests are unchanged.
+The operator subsequently approved `>= 120 tok/s` as the deployment acceptance
+floor. The 300 W intervention is therefore no longer a prerequisite, and the
+210 W investigation remains recorded as deployment provenance rather than an
+open blocker. Phase 4 remains incomplete until a trusted-main run made after
+the threshold change emits a machine-readable PASS. Phase 5 must not use either
+older WARN run as its comparison baseline. The release remains a prerelease and
+its three existing asset digests are unchanged.

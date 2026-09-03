@@ -72,11 +72,12 @@ Required aggregate output:
 
 The primary performance gate must use **server decode tok/s**, not wall-clock E2E tok/s. E2E remains a reported secondary metric.
 
-Initial thresholds:
+Operator-approved production thresholds (revised 2026-09-04 after two
+canonical R9700 measurements under the deployment host's 210 W policy):
 
-- decode PASS: `>= 180 tok/s`
-- decode WARN: `170–180 tok/s`
-- decode FAIL: `< 170 tok/s`
+- decode PASS: `>= 120 tok/s`
+- decode WARN: `110–120 tok/s`
+- decode FAIL: `< 110 tok/s`
 - Candidate regression gate: no more than 10% slower than the captured Reference server-decode average
 - model-backed DFlash2 acceptance requires speculative decode to run; a run that silently falls back to ordinary decoding is not a production PASS
 
@@ -182,7 +183,10 @@ Reference acceptance:
 - acceptance rate is recorded
 - no crashes, GPU faults, or KFD hangs
 
-The published ~208 tok/s server-decode result is a target/reference point, not a requirement for exact equality. Investigate materially lower performance before moving on.
+The published ~208 tok/s server-decode result is a target/reference point, not
+a requirement for exact equality. Investigate materially lower performance
+before moving on. The investigation must remain in the evidence even when the
+operator-approved 120 tok/s deployment floor is met.
 
 Record the full evidence and exact environment in `VALIDATION_STATUS.md`.
 
