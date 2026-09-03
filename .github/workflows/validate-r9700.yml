@@ -65,6 +65,8 @@ jobs:
         run: |
           ldd "$PACKAGE_ROOT/server/build/dflash_server" | tee "$RUNNER_TEMP/runtime-ldd.txt"
           ! grep -F 'not found' "$RUNNER_TEMP/runtime-ldd.txt"
+      - name: Run upstream no-model server unit tests
+        run: "$PACKAGE_ROOT/server/build/test_server_unit"
       - name: Qwen3.8 DFlash2 functional and performance validation
         if: inputs.model_backed
         env:

@@ -1,6 +1,8 @@
 name: Build and publish upstream release
 
 on:
+  pull_request:
+    types: [labeled]
   workflow_dispatch:
     inputs:
       upstream_ref:
@@ -35,6 +37,7 @@ concurrency:
 
 jobs:
   resolve-upstream:
+    if: github.event_name != 'pull_request' || github.event.label.name == 'full-rocm-build'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
@@ -99,7 +102,7 @@ jobs:
 
   publish:
     needs: [resolve-upstream, build]
-    if: needs.resolve-upstream.outputs.should_build == 'true' && needs.build.result == 'success'
+    if: github.event_name != 'pull_request' && needs.resolve-upstream.outputs.should_build == 'true' && needs.build.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:

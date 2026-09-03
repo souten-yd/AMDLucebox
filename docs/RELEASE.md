@@ -11,6 +11,11 @@ the workflow exits successfully before either expensive ROCm build unless force
 rebuild was explicitly requested. Force rebuild replaces assets for that exact
 tag; increment the revision when the wrapper or packaging contract changed.
 
+For pre-merge acceptance, a maintainer may add the `full-rocm-build` label to a
+pull request. That explicit label runs the same hosted, read-only build jobs but
+the publication job is disabled for pull-request events. Remove and re-add the
+label only when a new full build is genuinely needed.
+
 Build jobs run the Reference and Candidate tracks from the same resolved SHA.
 They upload short-lived Actions artifacts only after static verification. The
 publication job validates their checksums, creates `SHA256SUMS`, and publishes

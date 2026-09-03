@@ -183,6 +183,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("workflow_dispatch:", trigger)
         self.assertNotIn("pull_request", trigger)
         self.assertIn("runs-on: [self-hosted, linux, x64, r9700, gfx1201]", workflow)
+        self.assertIn("server/build/test_server_unit", workflow)
 
     def test_build_jobs_have_read_only_permissions(self) -> None:
         workflow = (ROOT / ".github/workflows/release.yml").read_text()
@@ -190,6 +191,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("permissions:\n      contents: write", workflow)
         self.assertIn("scripts/check-release.sh", workflow)
         self.assertIn("schedule:", workflow)
+        self.assertIn("github.event.label.name == 'full-rocm-build'", workflow)
+        self.assertIn("github.event_name != 'pull_request'", workflow)
 
     def test_actions_are_pinned(self) -> None:
         for workflow in (ROOT / ".github/workflows").glob("*.yml"):

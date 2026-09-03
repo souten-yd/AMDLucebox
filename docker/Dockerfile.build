@@ -49,8 +49,14 @@ RUN set -eu; \
     fi; \
     grep -F gfx1201 /verification/OFFLOAD.txt
 
-RUN mkdir -p /artifact/server /artifact/LICENSES /artifact/verification \
-    && cp -a server/build /artifact/server/build \
+RUN mkdir -p /artifact/server/build /artifact/LICENSES /artifact/verification \
+    && cp server/build/dflash_server server/build/test_dflash server/build/test_server_unit \
+      /artifact/server/build/ \
+    && if [ -d server/build/share ]; then cp -a server/build/share /artifact/server/build/share; fi \
+    && cd server/build \
+    && find deps \( -type f -o -type l \) -name 'lib*.so*' \
+      -exec cp -a --parents '{}' /artifact/server/build/ \; \
+    && cd /src \
     && cp -a server/scripts /artifact/server/scripts \
     && cp -a server/share /artifact/server/share \
     && cp LICENSE /artifact/LICENSES/LUCEBOX-LICENSE \
