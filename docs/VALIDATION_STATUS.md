@@ -35,3 +35,25 @@ model loading, OpenAI-compatible generation, speculative decoding, benchmark
 capture, and the ROCm 10 versus 7.2 performance comparison have not executed.
 Releases must remain prereleases until those checks pass through the trusted
 manual R9700 workflow described in `SELF_HOSTED_RUNNER.md`.
+
+## 2026-09-03 Production Acceptance Phase 1 — PASS
+
+Phase 1 was merged by [PR #2](https://github.com/souten-yd/AMDLucebox/pull/2)
+as AMDLucebox commit `85fd4b01e0451f6fd3606bf4296288ad4c12e026`.
+Pinned upstream `main` was rechecked immediately before and after acceptance and
+remained `298031aa4222ec61c971ed834ec8f8829ce37a5c`.
+
+- wrapper/unit and workflow validation: PASS, run
+  [`33761452334`](https://github.com/souten-yd/AMDLucebox/actions/runs/33761452334)
+  (15 tests plus repository CI gates)
+- full ROCm 7.2.4 Reference build: PASS, run
+  [`33761493554`](https://github.com/souten-yd/AMDLucebox/actions/runs/33761493554)
+- full ROCm 10.0.0 Candidate build: PASS, same run `33761493554`
+- publication from the PR: correctly skipped; existing release assets unchanged
+- committed model weights: none
+
+The benchmark result schema is now version 2. Its primary gate is
+`usage.timings.decode_tokens_per_sec`; client end-to-end throughput is retained
+separately. Missing server timings, failure to run speculative decoding on any
+measured request, or a Candidate regression above 10% causes a production
+failure. `HIP_VISIBLE_DEVICES` is set for the complete trusted validation job.
