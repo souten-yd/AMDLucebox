@@ -302,3 +302,58 @@ the Reference/Candidate comparison JSON SHA-256 is
 Evidence artifact ID `9915738019` is 83,932 bytes, has archive digest
 `sha256:2e09d1e7f2036179c53073933a9a7bfe3135f97a7ca3fd94d62e2690df3292b0`,
 and is retained through 2026-12-02. Phase 5 is PASS.
+
+## 2026-09-04 Production Acceptance Phase 6 — PASS
+
+The repository and pinned upstream were rechecked before promotion. The
+promotion implementation merged to trusted `main` as
+`628a1f0faf6f6cdf40a1a44ace8fd317d9a9a065`; upstream still resolves to
+`298031aa4222ec61c971ed834ec8f8829ce37a5c` on `Luce-Org/lucebox` `main`,
+matching the exact release and model-conversion provenance.
+
+[PR #20](https://github.com/souten-yd/AMDLucebox/pull/20) added the dedicated
+manual, GitHub-hosted, evidence-gated in-place promotion workflow and merged
+after CI run
+[`33814462563`](https://github.com/souten-yd/AMDLucebox/actions/runs/33814462563)
+passed all 27 repository tests. The verifier was also run locally against the
+actual release and accepted validation artifacts before promotion. It checked
+the three existing release assets, successful trusted-main run identities,
+ten-prompt/speculative-decode results, the operator-approved 120 tok/s floor,
+the 10% Candidate comparison gate, identical model/settings provenance, ROCm
+7.2.x/10.0.0 separation, and the curated evidence files for credential
+patterns.
+
+Trusted-main manual promotion run
+[`33814508541`](https://github.com/souten-yd/AMDLucebox/actions/runs/33814508541)
+passed every gate and promoted
+[`lucebox-298031aa-r1`](https://github.com/souten-yd/AMDLucebox/releases/tag/lucebox-298031aa-r1)
+from prerelease to a normal non-draft release. The accepted measurements bound
+into the promotion manifest are:
+
+- ROCm 7.2 Reference run `33810920024`: `171.01 tok/s` server decode,
+  `140.404 tok/s` E2E, `0.702321` acceptance, speculative decode 10/10
+- ROCm 10 Candidate run `33813673307`: `171.94 tok/s` server decode,
+  `141.212 tok/s` E2E, `0.702321` acceptance, speculative decode 10/10
+- Candidate regression: `-0.5438%` (0.5438% faster), 10% gate PASS
+
+The three validated assets were not rebuilt, replaced, or modified. Their
+post-promotion identities remain exactly:
+
+- ROCm 7.2.4 package: asset `RA_kwDOUNDbec4gWjGG`, 25,814,285 bytes,
+  SHA-256 `297322f3885615665157ecad0939ed4e1c2c0cfabd2af8cd29feeb4d8b22feda`
+- ROCm 10.0.0 package: asset `RA_kwDOUNDbec4gWjGF`, 24,505,201 bytes,
+  SHA-256 `52472001d7307c793396b995990b8a342492d511ab6969361e2553f50e182257`
+- `SHA256SUMS`: asset `RA_kwDOUNDbec4gWjGH`, 231 bytes,
+  SHA-256 `291e4870de739b1b7432071aa556e3e26b8ca4588344c9b0aad9371f5c894967`
+
+The release now also carries the non-secret production-acceptance evidence
+bundle (94,279 bytes), SHA-256
+`d6615a4c51dd010219b50f367976fcf9be938c77bdd18004ab3c1b8e5a601569`,
+and its checksum asset, SHA-256
+`033958f9af1cb6f44054f87f24002ba74bfaf02827b5cdcf5789e54de40c83c1`.
+A clean re-download passed `sha256sum -c`, and the embedded manifest reports
+PASS while authenticating 30 curated evidence files. The same promotion record
+is retained for 90 days as Actions artifact `9916025320` (96,987 bytes),
+archive digest
+`sha256:a73f903970c0538a58e655c7d39d6f40a5cc89b4b4e24e3594b8f872b900721f`.
+Phase 6 and the required Production Acceptance plan are PASS.
