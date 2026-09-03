@@ -206,3 +206,39 @@ open blocker. Phase 4 remains incomplete until a trusted-main run made after
 the threshold change emits a machine-readable PASS. Phase 5 must not use either
 older WARN run as its comparison baseline. The release remains a prerelease and
 its three existing asset digests are unchanged.
+
+### Phase 4 accepted Reference
+
+[PR #14](https://github.com/souten-yd/AMDLucebox/pull/14) implemented the
+operator-approved production floor and merged as
+`adf68caea6c0091a5c0f937cb36057b5682c6d01` after CI run
+[`33810870212`](https://github.com/souten-yd/AMDLucebox/actions/runs/33810870212)
+passed all 21 repository tests. The Candidate regression limit remains 10%, and
+the published 208 tok/s result remains a diagnostic reference rather than the
+deployment floor.
+
+Trusted-main Reference run
+[`33810920024`](https://github.com/souten-yd/AMDLucebox/actions/runs/33810920024)
+at that exact head is the accepted Phase 4 baseline:
+
+- result: PASS with no failure reasons
+- server decode average: `171.01 tok/s`
+- client E2E average: `140.404 tok/s`
+- mean acceptance: `0.702321`
+- speculative decode: 10/10 requests (`1.0` fraction)
+- workload: pinned-upstream ten-prompt HTTP HumanEval corpus, SHA-256
+  `e317321b7e26a48335860288b5bb9dc8666403d2c877f6043b10727f18dceb0c`,
+  three warmups, 256 maximum output tokens, greedy decoding
+- server: block 16, max context 131072, K/V cache q8_0, visible GPU 0
+- benchmark JSON SHA-256:
+  `261c41f111451aabd550fb1ab2d4be4d2cd9bb9eefdb9c9a1010a1884d45d735`
+- evidence artifact ID `9914766197`, 59,384 bytes, retained for 90 days
+
+The tested package is the immutable ROCm 7.2.4 Reference asset with SHA-256
+`297322f3885615665157ecad0939ed4e1c2c0cfabd2af8cd29feeb4d8b22feda`.
+The host userspace is ROCm 7.2.1/HIP `7.2.53211`, the same required major/minor
+family; kernel `7.0.0-30-generic` and the complete redacted R9700 environment,
+process list, clocks, power and temperatures are preserved in the artifact.
+Model hashes match the Phase 3 manifest. No crash, GPU fault, or KFD hang
+occurred. Phase 4 is PASS; run `33810920024` is the only Reference run permitted
+as the Phase 5 comparison input.
