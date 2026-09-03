@@ -69,7 +69,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.meta.outputs.release_tag }}
-          FORCE_REBUILD: ${{ github.event_name == 'workflow_dispatch' && inputs.force_rebuild || false }}
+          FORCE_REBUILD: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.force_rebuild) }}
         run: scripts/check-release.sh --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --force "$FORCE_REBUILD" --github-output "$GITHUB_OUTPUT"
       - name: Load build matrix
         id: matrix
