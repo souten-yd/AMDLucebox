@@ -1,0 +1,182 @@
+name: Promote validated release in place
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing validated prerelease tag
+        default: lucebox-298031aa-r1
+        required: true
+        type: string
+      reference_run_id:
+        description: Accepted ROCm 7.2.4 Reference run ID
+        default: "33810920024"
+        required: true
+        type: string
+      candidate_run_id:
+        description: Accepted ROCm 10.0.0 Candidate run ID
+        default: "33813673307"
+        required: true
+        type: string
+      reference_asset_sha256:
+        description: Validated ROCm 7.2.4 package SHA-256
+        default: 297322f3885615665157ecad0939ed4e1c2c0cfabd2af8cd29feeb4d8b22feda
+        required: true
+        type: string
+      candidate_asset_sha256:
+        description: Validated ROCm 10.0.0 package SHA-256
+        default: 52472001d7307c793396b995990b8a342492d511ab6969361e2553f50e182257
+        required: true
+        type: string
+      checksums_sha256:
+        description: Existing SHA256SUMS asset SHA-256
+        default: 291e4870de739b1b7432071aa556e3e26b8ca4588344c9b0aad9371f5c894967
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: amdlucebox-stable-promotion
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      REFERENCE_RUN_ID: ${{ inputs.reference_run_id }}
+      CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+      REFERENCE_ASSET_SHA256: ${{ inputs.reference_asset_sha256 }}
+      CANDIDATE_ASSET_SHA256: ${{ inputs.candidate_asset_sha256 }}
+      CHECKSUMS_SHA256: ${{ inputs.checksums_sha256 }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Require current trusted main
+        run: |
+          [[ $GITHUB_REF == refs/heads/main ]] || {
+            echo "error: Stable promotion must be dispatched from main" >&2
+            exit 1
+          }
+          remote_main=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          [[ $GITHUB_SHA == "$remote_main" ]] || {
+            echo "error: workflow SHA is not current origin/main" >&2
+            exit 1
+          }
+          [[ $REFERENCE_RUN_ID =~ ^[0-9]+$ && $CANDIDATE_RUN_ID =~ ^[0-9]+$ ]] || {
+            echo "error: validation run IDs must be numeric" >&2
+            exit 1
+          }
+      - name: Download immutable release assets and validation evidence
+        run: |
+          mkdir -p promotion/release-assets promotion/reference promotion/candidate
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json tagName,url,isDraft,isPrerelease,assets > promotion/release-before.json
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --dir promotion/release-assets --pattern '*.tar.zst' --pattern SHA256SUMS
+          gh run view "$REFERENCE_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --json databaseId,conclusion,event,headBranch,headSha,url > promotion/reference-run.json
+          gh run view "$CANDIDATE_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --json databaseId,conclusion,event,headBranch,headSha,url > promotion/candidate-run.json
+          gh run download "$REFERENCE_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "r9700-validation-$RELEASE_TAG-reference" --dir promotion/reference
+          gh run download "$CANDIDATE_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "r9700-validation-$RELEASE_TAG-candidate" --dir promotion/candidate
+      - name: Verify promotion inputs
+        run: |
+          scripts/verify-promotion.py \
+            --tag "$RELEASE_TAG" \
+            --release-json promotion/release-before.json \
+            --assets-dir promotion/release-assets \
+            --reference-dir promotion/reference \
+            --candidate-dir promotion/candidate \
+            --reference-run-json promotion/reference-run.json \
+            --candidate-run-json promotion/candidate-run.json \
+            --reference-run-id "$REFERENCE_RUN_ID" \
+            --candidate-run-id "$CANDIDATE_RUN_ID" \
+            --reference-asset-sha256 "$REFERENCE_ASSET_SHA256" \
+            --candidate-asset-sha256 "$CANDIDATE_ASSET_SHA256" \
+            --checksums-sha256 "$CHECKSUMS_SHA256" \
+            --output promotion/production-acceptance-manifest.json
+      - name: Build non-secret evidence bundle
+        run: |
+          bundle=promotion/bundle
+          reference_files=(
+            benchmark-reference.json benchmark-reference.server.log
+            environment-before.json environment-after.json model-manifest.json
+            model-verification.json validation-context.json release-BUILD_INFO.json
+            release-SHA256SUMS release-asset.sha256 runtime-ldd.txt
+            r9700-diagnostics/hip-smoke.txt r9700-diagnostics/hipcc-version.txt
+          )
+          candidate_files=(
+            benchmark-candidate.json benchmark-candidate.server.log
+            environment-before.json environment-after.json model-manifest.json
+            model-verification.json validation-context.json release-BUILD_INFO.json
+            release-SHA256SUMS release-asset.sha256 runtime-ldd.txt
+            runtime-selection.json reference-candidate-input-check.json
+            r9700-diagnostics/hip-smoke.txt r9700-diagnostics/hipcc-version.txt
+          )
+          for file in "${reference_files[@]}"; do
+            install -D -m 0644 "promotion/reference/$file" "$bundle/reference/$file"
+          done
+          for file in "${candidate_files[@]}"; do
+            install -D -m 0644 "promotion/candidate/$file" "$bundle/candidate/$file"
+          done
+          install -m 0644 promotion/reference-run.json "$bundle/reference-run.json"
+          install -m 0644 promotion/candidate-run.json "$bundle/candidate-run.json"
+          install -m 0644 promotion/production-acceptance-manifest.json \
+            "$bundle/production-acceptance-manifest.json"
+          archive="production-acceptance-$RELEASE_TAG.tar.gz"
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
+            -czf "promotion/$archive" -C "$bundle" .
+          (cd promotion && sha256sum "$archive" > "$archive.sha256")
+          echo "EVIDENCE_ARCHIVE=$archive" >> "$GITHUB_ENV"
+      - name: Attach evidence and promote metadata only
+        run: |
+          gh release upload "$RELEASE_TAG" \
+            "promotion/$EVIDENCE_ARCHIVE" "promotion/$EVIDENCE_ARCHIVE.sha256" \
+            --repo "$GITHUB_REPOSITORY"
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --prerelease=false
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json tagName,url,isDraft,isPrerelease,assets > promotion/release-after.json
+          python3 - promotion/release-before.json promotion/release-after.json \
+            "promotion/$EVIDENCE_ARCHIVE" "promotion/$EVIDENCE_ARCHIVE.sha256" <<'PY'
+          import hashlib, json, pathlib, sys
+          before, after = (json.load(open(path, encoding="utf-8")) for path in sys.argv[1:3])
+          originals = {item["name"]: item for item in before["assets"]}
+          final = {item["name"]: item for item in after["assets"]}
+          errors = []
+          for name, old in originals.items():
+              new = final.get(name)
+              keys = ("id", "name", "size", "digest", "createdAt", "updatedAt")
+              if new is None or any(new.get(key) != old.get(key) for key in keys):
+                  errors.append(f"original asset changed: {name}")
+          for local_name in sys.argv[3:5]:
+              path = pathlib.Path(local_name)
+              digest = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+              remote = final.get(path.name)
+              if remote is None or remote.get("digest") != digest or remote.get("size") != path.stat().st_size:
+                  errors.append(f"evidence asset mismatch: {path.name}")
+          if after.get("isDraft") is not False or after.get("isPrerelease") is not False:
+              errors.append("release is not a published normal release")
+          if set(final) != set(originals) | {pathlib.Path(value).name for value in sys.argv[3:5]}:
+              errors.append("unexpected final release asset set")
+          if errors:
+              raise SystemExit("; ".join(errors))
+          PY
+      - name: Preserve promotion evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: stable-promotion-${{ inputs.release_tag }}
+          path: |
+            promotion/production-acceptance-manifest.json
+            promotion/release-before.json
+            promotion/release-after.json
+            promotion/${{ env.EVIDENCE_ARCHIVE }}
+            promotion/${{ env.EVIDENCE_ARCHIVE }}.sha256
+          if-no-files-found: error
+          retention-days: 90

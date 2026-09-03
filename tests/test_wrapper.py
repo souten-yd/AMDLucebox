@@ -34,6 +34,12 @@ RUNTIME_VERIFY_SPEC = importlib.util.spec_from_file_location(
 assert RUNTIME_VERIFY_SPEC and RUNTIME_VERIFY_SPEC.loader
 RUNTIME_VERIFY = importlib.util.module_from_spec(RUNTIME_VERIFY_SPEC)
 RUNTIME_VERIFY_SPEC.loader.exec_module(RUNTIME_VERIFY)
+PROMOTION_VERIFY_SPEC = importlib.util.spec_from_file_location(
+    "verify_promotion", ROOT / "scripts/verify-promotion.py"
+)
+assert PROMOTION_VERIFY_SPEC and PROMOTION_VERIFY_SPEC.loader
+PROMOTION_VERIFY = importlib.util.module_from_spec(PROMOTION_VERIFY_SPEC)
+PROMOTION_VERIFY_SPEC.loader.exec_module(PROMOTION_VERIFY)
 
 
 def run(*args: str, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -139,6 +145,52 @@ class ReleaseStateTests(unittest.TestCase):
             )
             self.assertIn("release_exists=false", result.stdout)
             self.assertIn("should_build=true", result.stdout)
+
+    def test_promotion_requires_the_exact_original_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            assets = Path(directory)
+            reference = assets / "reference.tar.zst"
+            candidate = assets / "candidate.tar.zst"
+            reference.write_bytes(b"reference")
+            candidate.write_bytes(b"candidate")
+            reference_hash = hashlib.sha256(reference.read_bytes()).hexdigest()
+            candidate_hash = hashlib.sha256(candidate.read_bytes()).hexdigest()
+            checksums = assets / "SHA256SUMS"
+            checksums.write_text(
+                f"{reference_hash}  {reference.name}\n{candidate_hash}  {candidate.name}\n"
+            )
+            hashes = {
+                reference.name: reference_hash,
+                candidate.name: candidate_hash,
+                checksums.name: hashlib.sha256(checksums.read_bytes()).hexdigest(),
+            }
+            release = {
+                "isDraft": False,
+                "isPrerelease": True,
+                "assets": [
+                    {
+                        "id": index,
+                        "name": path.name,
+                        "size": path.stat().st_size,
+                        "digest": f"sha256:{hashes[path.name]}",
+                        "createdAt": "2026-09-03T00:00:00Z",
+                        "updatedAt": "2026-09-03T00:00:00Z",
+                    }
+                    for index, path in enumerate((reference, candidate, checksums), 1)
+                ],
+            }
+            verified = PROMOTION_VERIFY.expected_release_assets(release, assets, hashes)
+            self.assertEqual(set(verified), set(hashes))
+            candidate.write_bytes(b"tampered")
+            with self.assertRaisesRegex(ValueError, "release asset hash mismatch"):
+                PROMOTION_VERIFY.expected_release_assets(release, assets, hashes)
+
+    def test_promotion_evidence_rejects_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory)
+            (evidence / "safe.txt").write_text("github_pat_" + "a" * 30)
+            with self.assertRaisesRegex(ValueError, "possible credential"):
+                PROMOTION_VERIFY.require_files(evidence, ("safe.txt",))
 
 
 class PackageTests(unittest.TestCase):
@@ -483,6 +535,19 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("fail-fast: true", workflow)
         self.assertNotIn("validated_release", workflow)
         self.assertIn("prerelease: true", workflow)
+
+    def test_stable_promotion_is_manual_hosted_and_metadata_only(self) -> None:
+        workflow = (ROOT / ".github/workflows/promote-release.yml").read_text()
+        trigger = workflow.split("permissions:", 1)[0]
+        self.assertIn("workflow_dispatch:", trigger)
+        self.assertNotIn("pull_request", trigger)
+        self.assertIn("runs-on: ubuntu-24.04", workflow)
+        self.assertNotIn("self-hosted", workflow)
+        self.assertIn("scripts/verify-promotion.py", workflow)
+        self.assertIn("--prerelease=false", workflow)
+        self.assertNotIn("--clobber", workflow)
+        self.assertIn("original asset changed", workflow)
+        self.assertIn("retention-days: 90", workflow)
 
     def test_actions_are_pinned(self) -> None:
         for workflow in (ROOT / ".github/workflows").glob("*.yml"):
