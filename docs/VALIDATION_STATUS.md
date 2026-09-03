@@ -30,8 +30,8 @@ validation.
 ## Environment-bound checks
 
 A dedicated repository self-hosted Actions runner is now registered and the
-no-model Phase 2 gate has passed. Qwen3.8 target and DFlash2 draft staging is in
-progress outside Git. Model loading, OpenAI-compatible generation, speculative
+no-model Phase 2 gate has passed. Qwen3.8 target and DFlash2 draft staging has
+passed outside Git. Model loading, OpenAI-compatible generation, speculative
 decoding, benchmark capture, and the ROCm 10 versus 7.2 performance comparison
 have not executed yet. Releases must remain prereleases until those checks pass
 through the trusted manual R9700 workflow described in
@@ -92,3 +92,37 @@ Evidence artifact
 `b495abc4c0403fd9af2522b8ed6caa507ff01f63b47ef43ccb96aa603dbdddba`.
 It contains `rocminfo.txt`, `hipcc-version.txt`, the HIP smoke output/binary,
 and `runtime-ldd.txt`; no model weights are present.
+
+## 2026-09-03 Production Acceptance Phase 3 — PASS
+
+Repository and pinned upstream were rechecked at Phase 3 entry. AMDLucebox
+`main` was `1a2396254f2329889c9c117097587cb9aa63eee6`; the detached,
+recursive Lucebox checkout remained
+`298031aa4222ec61c971ed834ec8f8829ce37a5c` with pinned
+Block-Sparse-Attention and CUTLASS submodules.
+
+The production model pair is staged under
+`/data1tb/LLM/AMDLucebox/qwen38`, outside both the repository and Actions
+workspace:
+
+- target `Qwen3.8-27B-UD-IQ4_XS.gguf`: 14,252,845,984 bytes, SHA-256
+  `40fac4050e940397dbf13087afd50f4734a11805bf9d65ef8ddd7483470e6199`
+- Q8_0 draft `qwen38-dflash2-q8_0.gguf`: 2,045,471,776 bytes, SHA-256
+  `bb727abc583498aa4deea8b3cd0c34c2d96553954cbff25b5f7bdd469f0f1306`
+
+The target is pinned to `unsloth/Qwen3.8-27B-GGUF` revision
+`4ca720788d1e01f1bff70c033e0d0028fd02e502`. The draft source is pinned
+to `incoai/Qwen3.8-27B-DFlash2` revision
+`dedf8df68adfb1afeaf7b7480c0a0243108177b4`; its original
+`model.safetensors` SHA-256 is
+`67fc76d68dc5a9415511a4f394ef744d67510cd20e93b37cc2cc7d28e4bab65c`.
+Both repository metadata files declare Apache-2.0.
+
+Pinned upstream conversion produced an 81-tensor draft (49 Q8_0 tensors and
+32 preserved F32 tensors). The local, machine-readable
+`validation/model-manifest.json` records source revisions, file sizes/hashes,
+submodules, exact converter/quantizer script hashes, commands, Python 3.12.3,
+and package versions. Its SHA-256 is
+`f14653657df9e5ffc32254bc260da304a6d71a56d7399d618f2dcde8ed247d3e`.
+A full manifest-driven reread independently verified both production files.
+No GGUF or safetensors file is tracked by Git or uploaded to GitHub.
