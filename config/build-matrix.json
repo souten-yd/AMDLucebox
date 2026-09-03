@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "tracks": [
+    {
+      "name": "reference",
+      "role": "reference",
+      "rocm_version": "7.2.4",
+      "image_tag": "rocm/dev-ubuntu-24.04:7.2.4-complete",
+      "image_digest": "sha256:92f309c51b52cef8762867848f1529dee821624f23cd5df38455e819538f762f",
+      "llvm_target": "gfx1201"
+    },
+    {
+      "name": "candidate",
+      "role": "production-candidate",
+      "rocm_version": "10.0.0",
+      "image_tag": "rocm/dev-ubuntu-24.04:10.0.0-full",
+      "image_digest": "sha256:a90cf047f615abe70fbef83c64def0a2d549ef37a39c8ea545430aba4981b374",
+      "llvm_target": "gfx1201"
+    }
+  ]
+}
