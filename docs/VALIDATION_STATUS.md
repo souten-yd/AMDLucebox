@@ -29,12 +29,13 @@ validation.
 
 ## Environment-bound checks
 
-No repository self-hosted Actions runner is currently registered, and the
-Qwen3.8 target and DFlash2 draft weights are not staged on this host. Therefore
-model loading, OpenAI-compatible generation, speculative decoding, benchmark
-capture, and the ROCm 10 versus 7.2 performance comparison have not executed.
-Releases must remain prereleases until those checks pass through the trusted
-manual R9700 workflow described in `SELF_HOSTED_RUNNER.md`.
+A dedicated repository self-hosted Actions runner is now registered and the
+no-model Phase 2 gate has passed. Qwen3.8 target and DFlash2 draft staging is in
+progress outside Git. Model loading, OpenAI-compatible generation, speculative
+decoding, benchmark capture, and the ROCm 10 versus 7.2 performance comparison
+have not executed yet. Releases must remain prereleases until those checks pass
+through the trusted manual R9700 workflow described in
+`SELF_HOSTED_RUNNER.md`.
 
 ## 2026-09-03 Production Acceptance Phase 1 — PASS
 
@@ -58,47 +59,36 @@ separately. Missing server timings, failure to run speculative decoding on any
 measured request, or a Candidate regression above 10% causes a production
 failure. `HIP_VISIBLE_DEVICES` is set for the complete trusted validation job.
 
-## 2026-09-03 Production Acceptance Phase 2 — BLOCKED_EXTERNAL
+## 2026-09-03 Production Acceptance Phase 2 — PASS
 
-Repository and pinned upstream were rechecked at Phase 2 entry. AMDLucebox
-`main` was `9bfba9d7927f5b323037cf5f187e161fde0e68c0`, upstream remained
-`298031aa4222ec61c971ed834ec8f8829ce37a5c`, and the repository had zero
-registered Actions runners. The R9700 host is Ubuntu 24.04.4 with kernel
-`7.0.0-30-generic`; the current account has `render` and `video` access and
-ROCm 7.2, but there is no dedicated non-root runner account. Codex has no
-non-interactive sudo authority, so it must not weaken the boundary by running
-the public-repository runner under the operator's general-purpose account.
+Repository and pinned upstream were rechecked at Phase 2 entry and acceptance.
+AMDLucebox `main` was
+`de657a3057bdf18dac63f2b807ed3e7d71ea1421`; upstream remained
+`298031aa4222ec61c971ed834ec8f8829ce37a5c`.
 
-Required external setup (runner registration tokens must stay out of Git and
-logs):
+The repository runner `souten-Linux` uses Actions runner v2.337.0 as a systemd
+service under dedicated non-root UID 997 (`amdlucebox-runner`). It has
+`render`/`video` group membership and the exact required labels
+`self-hosted,Linux,X64,r9700,gfx1201`. The workflow remains manual-only and was
+dispatched from trusted `main`; no pull-request event can select this runner.
 
-```bash
-sudo useradd --system --create-home \
-  --home-dir /data1tb/AMDLucebox-runner --shell /bin/bash amdlucebox-runner
-sudo usermod -aG render,video amdlucebox-runner
-sudo install -d -o amdlucebox-runner -g amdlucebox-runner \
-  /data1tb/AMDLucebox-runner/actions-runner
-```
+Manual validation run
+[`33764884969`](https://github.com/souten-yd/AMDLucebox/actions/runs/33764884969)
+at exact head `de657a3057bdf18dac63f2b807ed3e7d71ea1421` passed in 1 minute
+14 seconds with `track=reference`, `model_backed=false`, and
+`HIP_VISIBLE_DEVICES=0`:
 
-From GitHub `Settings > Actions > Runners > New self-hosted runner`, follow the
-Linux x64 commands as `amdlucebox-runner`. Use Actions runner v2.337.0 archive
-SHA-256 `70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613`,
-runner name `souten-r9700`, and custom labels `r9700,gfx1201`; retain the
-default `self-hosted,Linux,X64` labels. Install and start it as a service owned
-by `amdlucebox-runner`. Do not paste the short-lived registration token into
-this file, an issue, or chat.
+- `/dev/kfd`, render-node access, and non-hanging `rocminfo`: PASS
+- selected native device: AMD Radeon AI PRO R9700 (`gfx1201`)
+- compiled HIP vector-add smoke: PASS
+- ROCm/HIP reported by the host compiler: `7.2.53211-e1a6bc5663`
+- existing Release checksum and package verification: PASS
+- host `ldd`: PASS, no missing dependency
+- packaged upstream server tests: PASS, 447 passed / 0 failed / 0 skipped
 
-After the runner reports online, resume Phase 2 with:
-
-```bash
-gh workflow run validate-r9700.yml \
-  --repo souten-yd/AMDLucebox --ref main \
-  -f release_tag=lucebox-298031aa-r1 \
-  -f track=reference -f model_backed=false \
-  -f model_dir=/data1tb/LLM/AMDLucebox/qwen38 \
-  -f hip_visible_devices=0
-```
-
-Phase 2 is not accepted until that manual workflow and its evidence artifact
-are green. Model downloads requested by the operator may continue in parallel,
-but model conversion and acceptance do not bypass this gate.
+Evidence artifact
+`r9700-validation-lucebox-298031aa-r1-reference` has Actions artifact ID
+`9897085515`, archive size 10,052 bytes, and uploaded ZIP SHA-256
+`b495abc4c0403fd9af2522b8ed6caa507ff01f63b47ef43ccb96aa603dbdddba`.
+It contains `rocminfo.txt`, `hipcc-version.txt`, the HIP smoke output/binary,
+and `runtime-ldd.txt`; no model weights are present.
