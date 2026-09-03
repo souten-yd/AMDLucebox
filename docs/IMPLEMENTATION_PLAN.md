@@ -500,9 +500,9 @@ Do not require exact reproduction in CI because clock, power, thermal state, dri
 Initial guardrail may be:
 
 ```text
->= 180 tok/s: PASS
-170-180 tok/s: WARN
-< 170 tok/s: FAIL
+>= 120 tok/s: PASS
+110-120 tok/s: WARN
+< 110 tok/s: FAIL
 ```
 
 The benchmark implementation should make thresholds configurable so they can be tightened after enough local data is collected.
