@@ -28,9 +28,25 @@ on:
         default: "0"
         required: true
         type: string
+      benchmark_warmups:
+        description: Warm-up requests before recorded model measurements
+        default: "3"
+        required: true
+        type: string
+      benchmark_max_tokens:
+        description: Completion tokens requested for every benchmark prompt
+        default: "256"
+        required: true
+        type: string
+      reference_run_id:
+        description: Accepted Reference run ID required for Candidate comparison
+        default: ""
+        required: false
+        type: string
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: amdlucebox-r9700-validation
@@ -42,6 +58,12 @@ jobs:
     timeout-minutes: 90
     env:
       HIP_VISIBLE_DEVICES: ${{ inputs.hip_visible_devices }}
+      MODEL_DIR: ${{ inputs.model_dir }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      TRACK: ${{ inputs.track }}
+      BENCHMARK_WARMUPS: ${{ inputs.benchmark_warmups }}
+      BENCHMARK_MAX_TOKENS: ${{ inputs.benchmark_max_tokens }}
+      REFERENCE_RUN_ID: ${{ inputs.reference_run_id }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: R9700 and KFD preflight
@@ -49,8 +71,6 @@ jobs:
       - name: Download release package and checksums
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
-          TRACK: ${{ inputs.track }}
         run: |
           rocm=$(python3 - "$TRACK" <<'PY'
           import json, sys
@@ -67,23 +87,174 @@ jobs:
           "$scripts_path" "$archive"
           mkdir extracted
           tar --zstd -xf "$archive" -C extracted
+          cp SHA256SUMS "$RUNNER_TEMP/release-SHA256SUMS"
+          sha256sum "$archive" > "$RUNNER_TEMP/release-asset.sha256"
           echo "PACKAGE_ROOT=$RUNNER_TEMP/amdlucebox-release/extracted/lucebox-r9700" >> "$GITHUB_ENV"
+          echo "ROCM_BUILD_VERSION=$rocm" >> "$GITHUB_ENV"
+          echo "RELEASE_ASSET_NAME=$(basename "$archive")" >> "$GITHUB_ENV"
+          cp extracted/lucebox-r9700/BUILD_INFO.json "$RUNNER_TEMP/release-BUILD_INFO.json"
       - name: Check host runtime dependencies
         run: |
           ldd "$PACKAGE_ROOT/server/build/dflash_server" | tee "$RUNNER_TEMP/runtime-ldd.txt"
           ! grep -F 'not found' "$RUNNER_TEMP/runtime-ldd.txt"
       - name: Run upstream no-model server unit tests
         run: "$PACKAGE_ROOT/server/build/test_server_unit"
+      - name: Verify staged model provenance and contents
+        if: inputs.model_backed
+        run: |
+          scripts/verify-staged-models.py \
+            --manifest "$MODEL_DIR/validation/model-manifest.json" \
+            --model-dir "$MODEL_DIR" \
+            --build-info "$RUNNER_TEMP/release-BUILD_INFO.json" \
+            --expected-rocm "$ROCM_BUILD_VERSION" \
+            --output "$RUNNER_TEMP/model-verification.json"
+          cp "$MODEL_DIR/validation/model-manifest.json" "$RUNNER_TEMP/model-manifest.json"
+      - name: Download accepted Reference result for Candidate
+        if: inputs.model_backed && inputs.track == 'candidate'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REFERENCE_RUN_ID: ${{ inputs.reference_run_id }}
+        run: |
+          [[ $REFERENCE_RUN_ID =~ ^[0-9]+$ ]] || {
+            echo "error: Candidate model validation requires reference_run_id" >&2
+            exit 1
+          }
+          mkdir -p "$RUNNER_TEMP/reference-evidence"
+          gh run view "$REFERENCE_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --json conclusion,event,headBranch,headSha,url > "$RUNNER_TEMP/reference-run.json"
+          gh run download "$REFERENCE_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "r9700-validation-$RELEASE_TAG-reference" \
+            --dir "$RUNNER_TEMP/reference-evidence"
+          mapfile -t references < <(find "$RUNNER_TEMP/reference-evidence" \
+            -type f -name benchmark-reference.json -print)
+          mapfile -t contexts < <(find "$RUNNER_TEMP/reference-evidence" \
+            -type f -name validation-context.json -print)
+          mapfile -t verifications < <(find "$RUNNER_TEMP/reference-evidence" \
+            -type f -name model-verification.json -print)
+          [[ ${#references[@]} -eq 1 && ${#contexts[@]} -eq 1 && ${#verifications[@]} -eq 1 ]] || {
+            echo "error: Reference artifact is missing unique benchmark/context/model evidence" >&2
+            exit 1
+          }
+          cp "${references[0]}" "$RUNNER_TEMP/benchmark-reference-input.json"
+          cp "${contexts[0]}" "$RUNNER_TEMP/reference-validation-context.json"
+          cp "${verifications[0]}" "$RUNNER_TEMP/reference-model-verification.json"
+          python3 - \
+            "$RUNNER_TEMP/reference-run.json" \
+            "$RUNNER_TEMP/benchmark-reference-input.json" \
+            "$RUNNER_TEMP/reference-validation-context.json" \
+            "$RUNNER_TEMP/reference-model-verification.json" \
+            "$RUNNER_TEMP/model-verification.json" \
+            "$RUNNER_TEMP/reference-candidate-input-check.json" <<'PY'
+          import json, os, sys
+          run, benchmark, context, reference_models, candidate_models = (
+              json.load(open(path, encoding="utf-8")) for path in sys.argv[1:6]
+          )
+          errors = []
+          if run.get("conclusion") != "success" or run.get("event") != "workflow_dispatch" or run.get("headBranch") != "main":
+              errors.append("Reference run was not a successful trusted main workflow_dispatch")
+          if benchmark.get("status") != "pass":
+              errors.append("Reference benchmark status is not pass")
+          expected_benchmark = {
+              "warmup_request_count": int(os.environ["BENCHMARK_WARMUPS"]),
+              "max_tokens": int(os.environ["BENCHMARK_MAX_TOKENS"]),
+              "temperature": 0,
+          }
+          for key, value in expected_benchmark.items():
+              if context.get("benchmark", {}).get(key) != value:
+                  errors.append(f"Reference benchmark setting differs: {key}")
+          expected_server = {
+              "draft_block_size": 16,
+              "max_context": 131072,
+              "k_cache": "q8_0",
+              "v_cache": "q8_0",
+          }
+          if context.get("server") != expected_server:
+              errors.append("Reference server settings differ")
+          if context.get("release_tag") != os.environ["RELEASE_TAG"]:
+              errors.append("Reference release tag differs")
+          if context.get("track") != "reference" or context.get("rocm_build_version") != "7.2.4":
+              errors.append("Reference track provenance is invalid")
+          if context.get("hip_visible_devices") != os.environ["HIP_VISIBLE_DEVICES"]:
+              errors.append("Reference GPU selection differs")
+          keys = ("role", "filename", "size_bytes", "sha256", "repository", "repository_revision")
+          normalize = lambda data: sorted(
+              ({key: item.get(key) for key in keys} for item in data.get("models", [])),
+              key=lambda item: item["role"],
+          )
+          if normalize(reference_models) != normalize(candidate_models):
+              errors.append("Reference and Candidate model identities differ")
+          result = {
+              "schema_version": 1,
+              "reference_run": run,
+              "compared_benchmark_settings": expected_benchmark,
+              "compared_server_settings": expected_server,
+              "model_identity_match": normalize(reference_models) == normalize(candidate_models),
+              "errors": errors,
+              "status": "pass" if not errors else "fail",
+          }
+          with open(sys.argv[6], "w", encoding="utf-8") as stream:
+              json.dump(result, stream, indent=2, sort_keys=True)
+              stream.write("\n")
+          if errors:
+              raise SystemExit("; ".join(errors))
+          PY
+          echo "REFERENCE_RESULTS=$RUNNER_TEMP/benchmark-reference-input.json" >> "$GITHUB_ENV"
+      - name: Capture pre-benchmark R9700 environment
+        if: inputs.model_backed
+        run: |
+          scripts/capture-r9700-environment.py --snapshot before \
+            --hip-visible-devices "$HIP_VISIBLE_DEVICES" \
+            --output "$RUNNER_TEMP/environment-before.json"
+          python3 - "$RUNNER_TEMP/validation-context.json" <<'PY'
+          import json, os, sys
+          data = {
+              "schema_version": 1,
+              "release_tag": os.environ["RELEASE_TAG"],
+              "release_asset_name": os.environ["RELEASE_ASSET_NAME"],
+              "track": os.environ["TRACK"],
+              "rocm_build_version": os.environ["ROCM_BUILD_VERSION"],
+              "workflow_head_sha": os.environ["GITHUB_SHA"],
+              "workflow_run_id": os.environ["GITHUB_RUN_ID"],
+              "hip_visible_devices": os.environ["HIP_VISIBLE_DEVICES"],
+              "benchmark": {
+                  "prompts": "scripts/benchmark-r9700.py DEFAULT_PROMPTS",
+                  "warmup_request_count": int(os.environ["BENCHMARK_WARMUPS"]),
+                  "max_tokens": int(os.environ["BENCHMARK_MAX_TOKENS"]),
+                  "temperature": 0,
+              },
+              "server": {
+                  "draft_block_size": 16,
+                  "max_context": 131072,
+                  "k_cache": "q8_0",
+                  "v_cache": "q8_0",
+              },
+              "reference_run_id": os.environ.get("REFERENCE_RUN_ID") or None,
+          }
+          with open(sys.argv[1], "w", encoding="utf-8") as stream:
+              json.dump(data, stream, indent=2, sort_keys=True)
+              stream.write("\n")
+          PY
       - name: Qwen3.8 DFlash2 functional and performance validation
         if: inputs.model_backed
-        env:
-          MODEL_DIR: ${{ inputs.model_dir }}
         run: |
+          args=(
+            --binary "$PACKAGE_ROOT/server/build/dflash_server"
+            --model "$MODEL_DIR/Qwen3.8-27B-UD-IQ4_XS.gguf"
+            --draft "$MODEL_DIR/qwen38-dflash2-q8_0.gguf"
+            --output "$RUNNER_TEMP/benchmark-$TRACK.json"
+            --warmups "$BENCHMARK_WARMUPS"
+            --max-tokens "$BENCHMARK_MAX_TOKENS"
+            --metrics-output "$RUNNER_TEMP/amd-smi-metrics.jsonl"
+          )
+          [[ -z ${REFERENCE_RESULTS:-} ]] || args+=(--reference-results "$REFERENCE_RESULTS")
           scripts/run-qwen38-r9700.sh \
-            --binary "$PACKAGE_ROOT/server/build/dflash_server" \
-            --model "$MODEL_DIR/Qwen3.8-27B-UD-IQ4_XS.gguf" \
-            --draft "$MODEL_DIR/qwen38-dflash2-q8_0.gguf" \
-            --output "$RUNNER_TEMP/benchmark-r9700.json"
+            "${args[@]}"
+      - name: Capture post-benchmark R9700 environment
+        if: always() && inputs.model_backed
+        run: |
+          scripts/capture-r9700-environment.py --snapshot after \
+            --hip-visible-devices "$HIP_VISIBLE_DEVICES" \
+            --output "$RUNNER_TEMP/environment-after.json"
       - name: Upload validation evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -92,7 +263,23 @@ jobs:
           path: |
             ${{ runner.temp }}/r9700-diagnostics
             ${{ runner.temp }}/runtime-ldd.txt
-            ${{ runner.temp }}/benchmark-r9700.json
-            ${{ runner.temp }}/benchmark-r9700.server.log
+            ${{ runner.temp }}/release-SHA256SUMS
+            ${{ runner.temp }}/release-asset.sha256
+            ${{ runner.temp }}/release-BUILD_INFO.json
+            ${{ runner.temp }}/model-manifest.json
+            ${{ runner.temp }}/model-verification.json
+            ${{ runner.temp }}/validation-context.json
+            ${{ runner.temp }}/benchmark-reference.json
+            ${{ runner.temp }}/benchmark-candidate.json
+            ${{ runner.temp }}/benchmark-reference-input.json
+            ${{ runner.temp }}/reference-run.json
+            ${{ runner.temp }}/reference-validation-context.json
+            ${{ runner.temp }}/reference-model-verification.json
+            ${{ runner.temp }}/reference-candidate-input-check.json
+            ${{ runner.temp }}/benchmark-reference.server.log
+            ${{ runner.temp }}/benchmark-candidate.server.log
+            ${{ runner.temp }}/amd-smi-metrics.jsonl
+            ${{ runner.temp }}/environment-before.json
+            ${{ runner.temp }}/environment-after.json
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: 90
