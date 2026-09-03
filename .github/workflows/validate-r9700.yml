@@ -63,6 +63,7 @@ jobs:
       TRACK: ${{ inputs.track }}
       BENCHMARK_WARMUPS: ${{ inputs.benchmark_warmups }}
       BENCHMARK_MAX_TOKENS: ${{ inputs.benchmark_max_tokens }}
+      BENCHMARK_PROMPTS: benchmarks/qwen38-humaneval-10.json
       REFERENCE_RUN_ID: ${{ inputs.reference_run_id }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -158,10 +159,16 @@ jobs:
               "warmup_request_count": int(os.environ["BENCHMARK_WARMUPS"]),
               "max_tokens": int(os.environ["BENCHMARK_MAX_TOKENS"]),
               "temperature": 0,
+              "prompt_count": 10,
           }
           for key, value in expected_benchmark.items():
               if context.get("benchmark", {}).get(key) != value:
                   errors.append(f"Reference benchmark setting differs: {key}")
+          candidate_prompt_digest = __import__("hashlib").sha256(
+              open(os.environ["BENCHMARK_PROMPTS"], "rb").read()
+          ).hexdigest()
+          if context.get("benchmark", {}).get("prompt_corpus_sha256") != candidate_prompt_digest:
+              errors.append("Reference benchmark prompt corpus differs")
           expected_server = {
               "draft_block_size": 16,
               "max_context": 131072,
@@ -217,7 +224,11 @@ jobs:
               "workflow_run_id": os.environ["GITHUB_RUN_ID"],
               "hip_visible_devices": os.environ["HIP_VISIBLE_DEVICES"],
               "benchmark": {
-                  "prompts": "scripts/benchmark-r9700.py DEFAULT_PROMPTS",
+                  "prompts": os.environ["BENCHMARK_PROMPTS"],
+                  "prompt_corpus_sha256": __import__("hashlib").sha256(
+                      open(os.environ["BENCHMARK_PROMPTS"], "rb").read()
+                  ).hexdigest(),
+                  "prompt_count": 10,
                   "warmup_request_count": int(os.environ["BENCHMARK_WARMUPS"]),
                   "max_tokens": int(os.environ["BENCHMARK_MAX_TOKENS"]),
                   "temperature": 0,

@@ -162,6 +162,13 @@ class PackageTests(unittest.TestCase):
 
 
 class BenchmarkTests(unittest.TestCase):
+    def test_default_prompt_corpus_matches_pinned_upstream_humaneval_profile(self) -> None:
+        prompts, digest = BENCHMARK.load_prompts(BENCHMARK.DEFAULT_PROMPTS_PATH)
+        self.assertEqual(len(prompts), 10)
+        self.assertEqual(digest, hashlib.sha256(BENCHMARK.DEFAULT_PROMPTS_PATH.read_bytes()).hexdigest())
+        self.assertTrue(prompts[0].startswith("from typing import List\n\ndef has_close_elements"))
+        self.assertTrue(prompts[-1].startswith("from typing import List\n\ndef rolling_max"))
+
     def test_response_parsing_uses_server_timings(self) -> None:
         parsed = BENCHMARK.parse_response(
             {
@@ -262,6 +269,10 @@ class BenchmarkTests(unittest.TestCase):
                 self.assertEqual(result["status"], "pass")
                 self.assertEqual(result["schema_version"], 2)
                 self.assertEqual(result["primary_measurement"], "server_decode_tokens_per_second")
+                self.assertEqual(result["settings"]["prompt_count"], 1)
+                self.assertEqual(
+                    result["settings"]["prompt_corpus_sha256"], hashlib.sha256(prompts.read_bytes()).hexdigest()
+                )
                 self.assertEqual(result["aggregate"]["average_server_decode_tokens_per_second"], 200.0)
                 self.assertEqual(result["runs"][0]["completion_tokens"], 10)
         finally:
