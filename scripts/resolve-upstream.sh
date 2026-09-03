@@ -27,7 +27,7 @@ done
 
 if [[ $ref =~ ^[0-9a-fA-F]{40}$ ]]; then
   sha=$(git ls-remote "$repository" | awk -v wanted="${ref,,}" \
-    'tolower($1) == wanted { print tolower($1); exit }')
+    'tolower($1) == wanted { found=tolower($1) } END { if (found) print found }')
 else
   sha=$(git ls-remote "$repository" "$ref" "refs/heads/$ref" "refs/tags/$ref" "refs/tags/$ref^{}" |
     awk '

@@ -42,6 +42,11 @@ class MatrixTests(unittest.TestCase):
 
 
 class ResolveTests(unittest.TestCase):
+    def test_full_sha_resolution_does_not_close_ls_remote_pipe_early(self) -> None:
+        script = (ROOT / "scripts/resolve-upstream.sh").read_text()
+        full_sha_branch = script.split("else", 1)[0]
+        self.assertNotIn("exit }", full_sha_branch)
+
     def test_resolves_branch_and_full_sha(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
