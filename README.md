@@ -137,6 +137,8 @@ Fresh upstream code runs only in jobs with `contents: read`. Release publication
 is a separate job with `contents: write` and does not execute upstream output.
 Unvalidated builds are prereleases; a normal release must follow real R9700
 validation. See [release operations](docs/RELEASE.md) and [runner setup](docs/SELF_HOSTED_RUNNER.md).
+The evidence and remaining environment-bound checks for the current wrapper
+revision are recorded in [validation status](docs/VALIDATION_STATUS.md).
 
 ## Troubleshooting
 

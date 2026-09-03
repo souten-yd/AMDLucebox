@@ -54,7 +54,7 @@ llvm_target=${track_values[3]}
 [[ $llvm_target == gfx1201 ]] || { echo "error: refusing non-gfx1201 target" >&2; exit 1; }
 [[ $image_digest =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "error: image digest is not immutable" >&2; exit 1; }
 
-upstream_sha=$($repo_root/scripts/resolve-upstream.sh \
+upstream_sha=$("$repo_root/scripts/resolve-upstream.sh" \
   --repository "$upstream_repository" --ref "$upstream_ref")
 upstream_short_sha=${upstream_sha:0:8}
 work_dir=$(mktemp -d)
