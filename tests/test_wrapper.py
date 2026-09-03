@@ -28,6 +28,12 @@ ENV_CAPTURE_SPEC = importlib.util.spec_from_file_location(
 assert ENV_CAPTURE_SPEC and ENV_CAPTURE_SPEC.loader
 ENV_CAPTURE = importlib.util.module_from_spec(ENV_CAPTURE_SPEC)
 ENV_CAPTURE_SPEC.loader.exec_module(ENV_CAPTURE)
+RUNTIME_VERIFY_SPEC = importlib.util.spec_from_file_location(
+    "verify_rocm_runtime", ROOT / "scripts/verify-rocm-runtime.py"
+)
+assert RUNTIME_VERIFY_SPEC and RUNTIME_VERIFY_SPEC.loader
+RUNTIME_VERIFY = importlib.util.module_from_spec(RUNTIME_VERIFY_SPEC)
+RUNTIME_VERIFY_SPEC.loader.exec_module(RUNTIME_VERIFY)
 
 
 def run(*args: str, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -299,7 +305,8 @@ class ModelEvidenceTests(unittest.TestCase):
     def test_environment_capture_records_other_gpu_processes(self) -> None:
         script = (ROOT / "scripts/capture-r9700-environment.py").read_text()
         self.assertIn('"amd_smi_process"', script)
-        self.assertIn('["amd-smi", "process", "--json"]', script)
+        self.assertIn('rocm_root / "bin/amd-smi"', script)
+        self.assertIn('os.environ.get("ROCM_PATH", "/opt/rocm")', script)
 
     def test_staged_model_manifest_verifies_content_and_release(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -350,6 +357,57 @@ class ModelEvidenceTests(unittest.TestCase):
             (models / "draft.gguf").write_bytes(b"tampered")
             with self.assertRaisesRegex(ValueError, "size mismatch"):
                 MODEL_VERIFY.verify(manifest, models, build_info, "7.2.4")
+
+
+class RuntimeEvidenceTests(unittest.TestCase):
+    def make_runtime(self, base: Path, version: str) -> Path:
+        root = base / "rocm"
+        for relative in (
+            ".info/version", "bin/hipcc", "bin/rocminfo", "bin/amd-smi",
+            "bin/rocm-smi", "lib/libamdhip64.so.7",
+        ):
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(version if relative == ".info/version" else relative)
+        return root
+
+    def make_matrix(self, base: Path) -> Path:
+        path = base / "matrix.json"
+        path.write_text(json.dumps({"tracks": [
+            {"name": "reference", "rocm_version": "7.2.4", "image_digest": "sha256:" + "7" * 64},
+            {"name": "candidate", "rocm_version": "10.0.0", "image_digest": "sha256:" + "a" * 64},
+        ]}))
+        return path
+
+    def test_reference_accepts_same_major_minor_without_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            result = RUNTIME_VERIFY.verify(
+                self.make_runtime(base, "7.2.1"), "reference", self.make_matrix(base), None
+            )
+            self.assertEqual(result["status"], "pass")
+            self.assertEqual(result["rocm_userspace_version"], "7.2.1")
+
+    def test_candidate_requires_exact_hashed_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = self.make_runtime(base, "10.0.0")
+            critical = root / "bin/hipcc"
+            provenance = base / "provenance.json"
+            provenance.write_text(json.dumps({
+                "source_manifest_digest": "sha256:" + "a" * 64,
+                "runtime_version": "10.0.0",
+                "runtime_root": str(root),
+                "critical_files": [{
+                    "path": "bin/hipcc",
+                    "sha256": hashlib.sha256(critical.read_bytes()).hexdigest(),
+                }],
+            }))
+            result = RUNTIME_VERIFY.verify(root, "candidate", self.make_matrix(base), provenance)
+            self.assertEqual(result["source_image_digest"], "sha256:" + "a" * 64)
+            critical.write_text("tampered")
+            with self.assertRaisesRegex(ValueError, "hash mismatch"):
+                RUNTIME_VERIFY.verify(root, "candidate", self.make_matrix(base), provenance)
 
     def test_model_manifest_rejects_release_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

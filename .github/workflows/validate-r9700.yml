@@ -43,6 +43,16 @@ on:
         default: ""
         required: false
         type: string
+      rocm_runtime_root:
+        description: Selected host ROCm userspace root (must be exact 10.0.0 for Candidate)
+        default: /opt/rocm
+        required: true
+        type: string
+      rocm_runtime_provenance:
+        description: External runtime provenance JSON (required for Candidate)
+        default: ""
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -65,8 +75,30 @@ jobs:
       BENCHMARK_MAX_TOKENS: ${{ inputs.benchmark_max_tokens }}
       BENCHMARK_PROMPTS: benchmarks/qwen38-humaneval-10.json
       REFERENCE_RUN_ID: ${{ inputs.reference_run_id }}
+      ROCM_RUNTIME_ROOT: ${{ inputs.rocm_runtime_root }}
+      ROCM_RUNTIME_PROVENANCE: ${{ inputs.rocm_runtime_provenance }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Select and verify ROCm userspace
+        run: |
+          args=(
+            --runtime-root "$ROCM_RUNTIME_ROOT"
+            --track "$TRACK"
+            --output "$RUNNER_TEMP/runtime-selection.json"
+          )
+          [[ -z $ROCM_RUNTIME_PROVENANCE ]] || args+=(--provenance "$ROCM_RUNTIME_PROVENANCE")
+          scripts/verify-rocm-runtime.py "${args[@]}"
+          runtime_root=$(jq -r .runtime_root "$RUNNER_TEMP/runtime-selection.json")
+          runtime_version=$(jq -r .rocm_userspace_version "$RUNNER_TEMP/runtime-selection.json")
+          source_digest=$(jq -r '.source_image_digest // ""' "$RUNNER_TEMP/runtime-selection.json")
+          {
+            echo "ROCM_PATH=$runtime_root"
+            echo "HIP_PATH=$runtime_root"
+            echo "LD_LIBRARY_PATH=$runtime_root/lib"
+            echo "ROCM_USERSPACE_VERSION=$runtime_version"
+            echo "ROCM_RUNTIME_SOURCE_DIGEST=$source_digest"
+          } >> "$GITHUB_ENV"
+          echo "$runtime_root/bin" >> "$GITHUB_PATH"
       - name: R9700 and KFD preflight
         run: scripts/preflight-r9700.sh "$RUNNER_TEMP/r9700-diagnostics"
       - name: Download release package and checksums
@@ -98,6 +130,31 @@ jobs:
         run: |
           ldd "$PACKAGE_ROOT/server/build/dflash_server" | tee "$RUNNER_TEMP/runtime-ldd.txt"
           ! grep -F 'not found' "$RUNNER_TEMP/runtime-ldd.txt"
+          python3 - "$TRACK" "$ROCM_PATH" "$RUNNER_TEMP/runtime-ldd.txt" <<'PY'
+          import pathlib, re, sys
+          track, runtime_root, ldd_path = sys.argv[1:]
+          if track != "candidate":
+              raise SystemExit(0)
+          root = pathlib.Path(runtime_root).resolve()
+          resolved = {}
+          for line in pathlib.Path(ldd_path).read_text().splitlines():
+              match = re.match(r"\s*(\S+)\s+=>\s+(\S+)", line)
+              if match:
+                  resolved[match.group(1)] = match.group(2)
+          required = ("libamdhip64.so.7", "libhipblas.so.3", "librocblas.so.5", "libhsa-runtime64.so.1")
+          errors = []
+          for name in required:
+              path = pathlib.Path(resolved.get(name, "missing"))
+              try:
+                  path.resolve().relative_to(root)
+              except ValueError:
+                  errors.append(f"{name} did not resolve inside {root}: {path}")
+          for name, value in resolved.items():
+              if value.startswith("/opt/rocm"):
+                  errors.append(f"Candidate fell back to system ROCm: {name} => {value}")
+          if errors:
+              raise SystemExit("; ".join(errors))
+          PY
       - name: Run upstream no-model server unit tests
         run: "$PACKAGE_ROOT/server/build/test_server_unit"
       - name: Verify staged model provenance and contents
@@ -181,6 +238,8 @@ jobs:
               errors.append("Reference release tag differs")
           if context.get("track") != "reference" or context.get("rocm_build_version") != "7.2.4":
               errors.append("Reference track provenance is invalid")
+          if not str(context.get("rocm_userspace_version", "")).startswith("7.2."):
+              errors.append("Reference userspace is not ROCm 7.2.x")
           if context.get("hip_visible_devices") != os.environ["HIP_VISIBLE_DEVICES"]:
               errors.append("Reference GPU selection differs")
           keys = ("role", "filename", "size_bytes", "sha256", "repository", "repository_revision")
@@ -220,6 +279,9 @@ jobs:
               "release_asset_name": os.environ["RELEASE_ASSET_NAME"],
               "track": os.environ["TRACK"],
               "rocm_build_version": os.environ["ROCM_BUILD_VERSION"],
+              "rocm_userspace_version": os.environ["ROCM_USERSPACE_VERSION"],
+              "rocm_runtime_root": os.environ["ROCM_PATH"],
+              "rocm_runtime_source_digest": os.environ.get("ROCM_RUNTIME_SOURCE_DIGEST") or None,
               "workflow_head_sha": os.environ["GITHUB_SHA"],
               "workflow_run_id": os.environ["GITHUB_RUN_ID"],
               "hip_visible_devices": os.environ["HIP_VISIBLE_DEVICES"],
@@ -274,6 +336,7 @@ jobs:
           path: |
             ${{ runner.temp }}/r9700-diagnostics
             ${{ runner.temp }}/runtime-ldd.txt
+            ${{ runner.temp }}/runtime-selection.json
             ${{ runner.temp }}/release-SHA256SUMS
             ${{ runner.temp }}/release-asset.sha256
             ${{ runner.temp }}/release-BUILD_INFO.json
