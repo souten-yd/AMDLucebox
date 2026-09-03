@@ -16,6 +16,18 @@ BENCHMARK_SPEC = importlib.util.spec_from_file_location("benchmark_r9700", ROOT 
 assert BENCHMARK_SPEC and BENCHMARK_SPEC.loader
 BENCHMARK = importlib.util.module_from_spec(BENCHMARK_SPEC)
 BENCHMARK_SPEC.loader.exec_module(BENCHMARK)
+MODEL_VERIFY_SPEC = importlib.util.spec_from_file_location(
+    "verify_staged_models", ROOT / "scripts/verify-staged-models.py"
+)
+assert MODEL_VERIFY_SPEC and MODEL_VERIFY_SPEC.loader
+MODEL_VERIFY = importlib.util.module_from_spec(MODEL_VERIFY_SPEC)
+MODEL_VERIFY_SPEC.loader.exec_module(MODEL_VERIFY)
+ENV_CAPTURE_SPEC = importlib.util.spec_from_file_location(
+    "capture_r9700_environment", ROOT / "scripts/capture-r9700-environment.py"
+)
+assert ENV_CAPTURE_SPEC and ENV_CAPTURE_SPEC.loader
+ENV_CAPTURE = importlib.util.module_from_spec(ENV_CAPTURE_SPEC)
+ENV_CAPTURE_SPEC.loader.exec_module(ENV_CAPTURE)
 
 
 def run(*args: str, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -250,6 +262,98 @@ class BenchmarkTests(unittest.TestCase):
             server.shutdown()
             thread.join()
             server.server_close()
+
+
+class ModelEvidenceTests(unittest.TestCase):
+    def test_model_launcher_records_warmups_tokens_and_live_metrics(self) -> None:
+        launcher = (ROOT / "scripts/run-qwen38-r9700.sh").read_text()
+        self.assertIn('--warmups "$warmups"', launcher)
+        self.assertIn('--max-tokens "$max_tokens"', launcher)
+        self.assertIn("scripts/sample-r9700-metrics.py", launcher)
+
+    def test_environment_evidence_redacts_hardware_identifiers(self) -> None:
+        redacted = ENV_CAPTURE.redact_hardware_identifiers(
+            {"uuid": "secret", "asic": {"asic_serial": "secret", "market_name": "R9700"}}
+        )
+        self.assertEqual(redacted["uuid"], "REDACTED")
+        self.assertEqual(redacted["asic"]["asic_serial"], "REDACTED")
+        self.assertEqual(redacted["asic"]["market_name"], "R9700")
+
+    def test_staged_model_manifest_verifies_content_and_release(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            models = base / "models"
+            models.mkdir()
+            entries = []
+            for role, filename, content in (
+                ("target", "target.gguf", b"target model"),
+                ("draft", "draft.gguf", b"draft model"),
+            ):
+                path = models / filename
+                path.write_bytes(content)
+                entries.append(
+                    {
+                        "role": role,
+                        "filename": filename,
+                        "size_bytes": len(content),
+                        "sha256": hashlib.sha256(content).hexdigest(),
+                        "repository": f"example/{role}",
+                        "repository_revision": role[0] * 40,
+                    }
+                )
+            upstream = "a" * 40
+            manifest = base / "manifest.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "production_models": entries,
+                        "conversion": {"upstream_commit": upstream},
+                    }
+                )
+            )
+            build_info = base / "BUILD_INFO.json"
+            build_info.write_text(
+                json.dumps(
+                    {
+                        "upstream_commit": upstream,
+                        "llvm_target": "gfx1201",
+                        "rocm_version": "7.2.4",
+                    }
+                )
+            )
+            result = MODEL_VERIFY.verify(manifest, models, build_info, "7.2.4")
+            self.assertEqual(result["status"], "pass")
+            self.assertEqual({item["role"] for item in result["models"]}, {"target", "draft"})
+            (models / "draft.gguf").write_bytes(b"tampered")
+            with self.assertRaisesRegex(ValueError, "size mismatch"):
+                MODEL_VERIFY.verify(manifest, models, build_info, "7.2.4")
+
+    def test_model_manifest_rejects_release_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            manifest = base / "manifest.json"
+            build_info = base / "BUILD_INFO.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "production_models": [],
+                        "conversion": {"upstream_commit": "a" * 40},
+                    }
+                )
+            )
+            build_info.write_text(
+                json.dumps(
+                    {
+                        "upstream_commit": "b" * 40,
+                        "llvm_target": "gfx1201",
+                        "rocm_version": "7.2.4",
+                    }
+                )
+            )
+            with self.assertRaisesRegex(ValueError, "upstream commits differ"):
+                MODEL_VERIFY.verify(manifest, base, build_info, "7.2.4")
 
 
 class WorkflowTests(unittest.TestCase):
