@@ -200,6 +200,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("schedule:", workflow)
         self.assertIn("github.event.label.name == 'full-rocm-build'", workflow)
         self.assertIn("github.event_name != 'pull_request'", workflow)
+        self.assertIn("fail-fast: true", workflow)
 
     def test_actions_are_pinned(self) -> None:
         for workflow in (ROOT / ".github/workflows").glob("*.yml"):

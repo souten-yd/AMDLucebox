@@ -79,7 +79,9 @@ jobs:
     needs: resolve-upstream
     if: needs.resolve-upstream.outputs.should_build == 'true'
     strategy:
-      fail-fast: false
+      # A failed track makes the release unusable; cancel its expensive sibling
+      # promptly and rerun both only after the root cause is fixed.
+      fail-fast: true
       matrix:
         include: ${{ fromJSON(needs.resolve-upstream.outputs.matrix) }}
     runs-on: ubuntu-24.04
