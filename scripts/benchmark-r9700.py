@@ -156,15 +156,19 @@ def main() -> int:
         if not isinstance(prompts, list) or not prompts or not all(isinstance(p, str) for p in prompts):
             parser.error("prompts JSON must be a non-empty string array")
 
-    payload: dict[str, Any] = {"prompt": "", "max_tokens": args.max_tokens, "temperature": 0}
-    endpoint = f"{args.base_url.rstrip('/')}/v1/completions"
+    payload: dict[str, Any] = {
+        "messages": [{"role": "user", "content": ""}],
+        "max_tokens": args.max_tokens,
+        "temperature": 0,
+    }
+    endpoint = f"{args.base_url.rstrip('/')}/v1/chat/completions"
     runs: list[dict[str, Any]] = []
     try:
         for index in range(args.warmups):
-            payload["prompt"] = prompts[index % len(prompts)]
+            payload["messages"][0]["content"] = prompts[index % len(prompts)]
             request_json(endpoint, payload, args.timeout)
         for prompt in prompts:
-            payload["prompt"] = prompt
+            payload["messages"][0]["content"] = prompt
             response, elapsed = request_json(endpoint, payload, args.timeout)
             runs.append(parse_response(response, elapsed, prompt))
         reference_tps = load_reference_server_tps(args.reference_results) if args.reference_results else None
