@@ -366,6 +366,14 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("server/build/test_server_unit", workflow)
         self.assertIn("HIP_VISIBLE_DEVICES: ${{ inputs.hip_visible_devices }}", workflow)
         self.assertIn('default: "0"', workflow)
+        self.assertIn("actions: read", workflow)
+        self.assertIn("scripts/verify-staged-models.py", workflow)
+        self.assertIn("scripts/capture-r9700-environment.py", workflow)
+        self.assertIn("--metrics-output", workflow)
+        self.assertIn("reference_run_id", workflow)
+        self.assertIn("benchmark-reference-input.json", workflow)
+        self.assertIn("reference-candidate-input-check.json", workflow)
+        self.assertIn("retention-days: 90", workflow)
 
     def test_build_jobs_have_read_only_permissions(self) -> None:
         workflow = (ROOT / ".github/workflows/release.yml").read_text()
